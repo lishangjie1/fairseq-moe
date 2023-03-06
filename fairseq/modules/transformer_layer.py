@@ -177,6 +177,7 @@ class TransformerEncoderLayer(nn.Module):
                 moe_eval_capacity_token_fraction=getattr(args, "moe_eval_capacity_token_fraction", 0.25),
                 batch_prioritized_routing=getattr(args, "moe_batch_prioritized_routing", False),
                 capacity_factor=getattr(args, "capacity_factor", 1.0),
+                moe_expert_output_masking=getattr(args, "moe_expert_output_masking", 0.0)
             )
         else:
             gate = Top2Gate(
@@ -188,6 +189,7 @@ class TransformerEncoderLayer(nn.Module):
                 getattr(args, "moe_eval_capacity_token_fraction", 0.25),
                 getattr(args, "moe_batch_prioritized_routing", False),
                 getattr(args, "capacity_factor", 1.0),
+                moe_expert_output_masking=getattr(args, "moe_expert_output_masking", 0.0)
             )
         return gate
 
@@ -403,7 +405,7 @@ class TransformerDecoderLayer(nn.Module):
                 moe_eval_capacity_token_fraction=getattr(args, "moe_eval_capacity_token_fraction", 0.25),
                 batch_prioritized_routing=getattr(args, "moe_batch_prioritized_routing", False),
                 capacity_factor=getattr(args, "capacity_factor", 1.0),
-
+                moe_expert_output_masking=getattr(args, "moe_expert_output_masking", 0.0)
             )
         else:
             gate = Top2Gate(
@@ -415,6 +417,7 @@ class TransformerDecoderLayer(nn.Module):
                 getattr(args, "moe_eval_capacity_token_fraction", 0.25),
                 getattr(args, "moe_batch_prioritized_routing", False),
                 getattr(args, "capacity_factor", 1.0),
+                moe_expert_output_masking=getattr(args, "moe_expert_output_masking", 0.0)
             )
         return gate
 

@@ -37,6 +37,7 @@ def top1gating(
     eval_mode=False,
     moe_eval_capacity_token_fraction=EVAL_CAPACITY_TOKEN_FRACTION,
     batch_prioritized_routing=False,
+    moe_expert_output_masking=0.0
 ) -> Tuple[Tensor, Tensor, Tensor, Dict]:
     """Implements Top2Gating on logits."""
     metadata = {}

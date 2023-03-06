@@ -1,0 +1,59 @@
+{
+    // 使用 IntelliSense 了解相关属性。 
+    // 悬停以查看现有属性的描述。
+    // 欲了解更多信息，请访问: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: 当前文件",
+            "type": "python",
+            //"module": "torch.distributed.launch",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "args": [
+                "/data/lsj/nfs/moe/moe_data",
+                "--ddp-backend", "fully_sharded", "--fp16", "--fp16-no-flatten-grads", "--use-sharded-state" ,
+                "--task", "translation_multi_simple_epoch",
+                "--langtoks-specs", "main" ,
+                "--langtoks", "{\"main\":(\"src\", \"tgt\")}" ,
+                "--sampling-method", "temperature", "--sampling-temperature", "1",
+                "--langs", "en,de", "--lang-pairs", "de-en",
+                "--arch", "transformer", "--share-all-embeddings" ,
+                "--encoder-normalize-before", "--decoder-normalize-before",
+                "--encoder-layers", "3", "--decoder-layers", "3",
+                "--encoder-embed-dim", "128", "--encoder-ffn-embed-dim", "256" ,
+                "--max-source-positions", "512", "--max-target-positions", "512", 
+                "--encoder-attention-heads", "8", "--decoder-attention-heads", "8",
+                "--moe-expert-count", "2", "--moe-freq", "2" ,
+                "--moe-gating-use-fp32", "--moe-second-expert-policy", "all" ,
+                "--moe-normalize-expert-grad", "sqrt_world_size" ,
+                "--moe-eval-capacity-token-fraction", "-1.0" ,
+                "--criterion", "moe_cross_entropy", "--moe-gate-loss-wt", "0.01", "--moe-gate-loss-combine-method", "sum" ,
+                "--optimizer", "adam","--adam-betas", "(0.9, 0.98)" ,"--clip-norm" ,"0.0" ,
+                "--lr", "0.0005" ,"--warmup-updates" ,"750" ,
+                "--dropout", "0.1", "--attention-dropout", "0.1" ,
+                "--update-freq" ,"1" ,
+                "--max-update", "250",
+                "--log-interval" ,"1",
+                "--save-dir", "/data/lsj/nfs/moe/moe_model3", "--save-interval-updates", "1000",
+                "--max-tokens", "2048",
+                "--record-a2a-perf-stats"
+            ]
+            // "args":[
+            //     "--nproc_per_node", "6", "--master_addr", "127.0.0.1", "--master_port", "12345",
+            //     "generate.py",
+            //     "/data/lsj/nfs/moe/moe_data" ,
+            //     "--task", "translation_multi_simple_epoch" ,
+            //     "-s", "de", "-t", "en" ,
+            //     "--lang-pairs", "de-en", "--langs", "en,de" ,
+            //     "--is-moe", "--use-sharded-state", "--path", "/data/lsj/nfs/moe/moe_model1/checkpoint_best.pt" ,
+            //     "--max-tokens", "512" ,"--beam", "5", "--sacrebleu" ,
+            //     "--remove-bpe" ,"--results-path", "/data/lsj/nfs/moe/moe_res" ,
+            //     "--langtoks-specs", "main",
+            //     "--langtoks","{'main':('src', 'tgt')}"
+            // ]   
+        }
+    ]
+}

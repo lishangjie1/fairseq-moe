@@ -64,6 +64,7 @@ def top2gating(
     capacity_factor=1.0,
     batch_prioritized_routing=False,
     has_tutel=False,
+    eom_dropout_module=None
 ) -> Tuple[Tensor, Tensor, Tensor]:
     """Implements Top2Gating on logits."""
     if has_tutel:
@@ -192,7 +193,9 @@ def top2gating(
     locations1_s = torch.sum(locations1 * mask1, dim=1)
     locations2_s = torch.sum(locations2 * mask2, dim=1)
     # EOM for gates1_s and gates2_s
-
+    if eom_dropout_module:
+        gates1_s = eom_dropout_module(gates1_s)
+        gates2_s = eom_dropout_module(gates2_s)
     # Calculate combine_weights and dispatch_mask
     gates1 = gates1_s.unsqueeze(-1) * mask1.to(gates1_s.dtype)  # einsum("s,se->se")
     gates2 = gates2_s.unsqueeze(-1) * mask2.to(gates2_s.dtype)  # einsum("s,se->se")
@@ -249,6 +252,7 @@ class Top2Gate(torch.nn.Module):
         moe_eval_capacity_token_fraction=0.25,
         batch_prioritized_routing=False,
         capacity_factor=1.0,
+        moe_expert_output_masking=0.0
     ) -> None:
         super().__init__()
         self.wg = torch.nn.Linear(model_dim, num_experts, bias=False)
@@ -258,6 +262,11 @@ class Top2Gate(torch.nn.Module):
         self.moe_eval_capacity_token_fraction = moe_eval_capacity_token_fraction
         self.batch_prioritized_routing = batch_prioritized_routing
         self.capacity_factor=capacity_factor
+        self.eom_dropout_module = None
+        if moe_expert_output_masking > 0.0:
+            self.moe_expert_output_masking = moe_expert_output_masking
+            from fairseq.modules import FairseqDropout
+            self.eom_dropout_module = FairseqDropout(self.moe_expert_output_masking, module_name=self.__class__.__name__)
         
     def forward(self, input: torch.Tensor=None, mask: Optional[torch.Tensor] = None, has_tutel=False, logits:torch.Tensor=None, ) -> Tuple[Tensor, Tensor, Tensor]:  # type: ignore
         if logits is None:
@@ -272,5 +281,6 @@ class Top2Gate(torch.nn.Module):
             moe_eval_capacity_token_fraction=self.moe_eval_capacity_token_fraction,
             capacity_factor=self.capacity_factor,
             batch_prioritized_routing=self.batch_prioritized_routing,
-            has_tutel=has_tutel
+            has_tutel=has_tutel,
+            eom_dropout_module=self.eom_dropout_module
         )
