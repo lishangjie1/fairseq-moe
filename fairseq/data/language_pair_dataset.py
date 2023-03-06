@@ -402,6 +402,7 @@ class LanguagePairDataset(FairseqDataset):
                 res["tgt_lang_id"] = (
                     torch.LongTensor([[self.tgt_lang_id]]).expand(bsz, 1).to(src_tokens)
                 )
+                res["net_input"]["tgt_lang_id"] = res["tgt_lang_id"] # for MOE language perception inference
         return res
 
     def num_tokens(self, index):
