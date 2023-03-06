@@ -1,7 +1,7 @@
-python=/path/to/python
+#python=/path/to/python
 embed_dim=512
 ffn_dim=2048
-num_experts=4
+num_experts=7
 moe_args="--moe-gating-use-fp32 \
         --moe-second-expert-policy all \
         --moe-normalize-expert-grad sqrt_world_size \
@@ -40,7 +40,7 @@ python train.py \
     --dropout 0.3 --weight-decay 0.0001 \
     --criterion cross_entropy \
     --max-tokens 4096 \
-    --ddp-backend legacy_ddp \
+    --ddp-backend fully_sharded \
     --fp16 \
     --encoder-normalize-before \
     --decoder-normalize-before \
@@ -54,5 +54,5 @@ python train.py \
     --record-a2a-perf-stats \
     --dataset-size 500000 \
     $moe_args \
-    $scomoe_feat_args \
-    --no-save
+#     $scomoe_feat_args \
+#     --no-save

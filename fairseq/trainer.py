@@ -354,6 +354,7 @@ class Trainer(object):
     @property
     def is_base_moe(self) -> bool:
         return getattr(self.cfg.model, "base_layers", 0) > 0
+    @property
     def use_sharded_state(self):
         return self.cfg.distributed_training.use_sharded_state
 

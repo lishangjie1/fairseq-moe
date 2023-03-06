@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 import torch.nn as nn
-from zmq import device
+#from zmq import device
 from fairseq import utils
 from fairseq.distributed import utils as dist_utils, fsdp_wrap
 from fairseq.models import (

@@ -46,6 +46,7 @@ def merge_expert_and_shared_state(expert_state, shared_state):
                 **expert_state[OPT_KEY]['state'],
                 **shared_state[OPT_KEY]['state'],
             }
+
     return state
 
 

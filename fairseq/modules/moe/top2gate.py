@@ -191,6 +191,7 @@ def top2gating(
     # Store the capacity location for each token
     locations1_s = torch.sum(locations1 * mask1, dim=1)
     locations2_s = torch.sum(locations2 * mask2, dim=1)
+    # EOM for gates1_s and gates2_s
 
     # Calculate combine_weights and dispatch_mask
     gates1 = gates1_s.unsqueeze(-1) * mask1.to(gates1_s.dtype)  # einsum("s,se->se")
@@ -247,7 +248,7 @@ class Top2Gate(torch.nn.Module):
         normalize_gate_prob_before_dropping=False,
         moe_eval_capacity_token_fraction=0.25,
         batch_prioritized_routing=False,
-        capacity_factor=1.0
+        capacity_factor=1.0,
     ) -> None:
         super().__init__()
         self.wg = torch.nn.Linear(model_dim, num_experts, bias=False)

@@ -126,7 +126,17 @@ def save_checkpoint(
         for cp in checkpoints[1:]:
             copy_or_symlink(src=checkpoints[0], dest=cp)
             if (trainer.is_moe or trainer.is_base_moe):
-                if trainer.is_fsdp or trainer.is_data_parallel_master:
+                if trainer.is_fsdp and not trainer.use_sharded_state and trainer.is_data_parallel_master:
+                    copy_or_symlink(
+                        src=re.sub("rank-[0-9]+", "shared", checkpoints[0]),
+                        dest=re.sub("rank-[0-9]+", "shared", cp),
+                    )
+                elif trainer.is_fsdp and trainer.use_sharded_state:
+                    copy_or_symlink(
+                        src=re.sub("rank-[0-9]+", "shared", checkpoints[0]),
+                        dest=re.sub("rank-[0-9]+", "shared", cp),
+                    )
+                elif not trainer.is_fsdp and trainer.is_data_parallel_master: # ddp
                     copy_or_symlink(
                         src=re.sub("rank-[0-9]+", "shared", checkpoints[0]),
                         dest=re.sub("rank-[0-9]+", "shared", cp),
@@ -479,7 +489,7 @@ def load_model_ensemble_and_task(
                 and cfg.model.langs != task.langs
             ):
                 upgrade_state_for_langs_difference(state, cfg.model, task)
-
+            
             model.load_state_dict(state["model"], strict=strict, model_cfg=cfg.model)
 
             # reset state so it gets loaded for the next model in ensemble
