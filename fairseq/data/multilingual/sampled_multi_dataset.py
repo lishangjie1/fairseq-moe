@@ -323,6 +323,10 @@ class SampledMultiDataset(FairseqDataset):
                 batch["net_input"]["src_lang_id"] = straight_order(
                     [b["net_input"]["src_lang_id"] for b in batches]
                 )
+            if "tgt_lang_id" in batches[0]["net_input"]:
+                batch["net_input"]["tgt_lang_id"] = straight_order(
+                    [b["net_input"]["tgt_lang_id"] for b in batches]
+                )
             if "tgt_lang_id" in batches[0]:
                 batch["tgt_lang_id"] = straight_order(
                     [b["tgt_lang_id"] for b in batches]

@@ -177,7 +177,8 @@ class TransformerEncoderLayer(nn.Module):
                 moe_eval_capacity_token_fraction=getattr(args, "moe_eval_capacity_token_fraction", 0.25),
                 batch_prioritized_routing=getattr(args, "moe_batch_prioritized_routing", False),
                 capacity_factor=getattr(args, "capacity_factor", 1.0),
-                moe_expert_output_masking=getattr(args, "moe_expert_output_masking", 0.0)
+                moe_expert_output_masking=getattr(args, "moe_expert_output_masking", 0.0),
+                use_moe_lang_perception=getattr(args, "use_moe_lang_perception", False)
             )
         else:
             gate = Top2Gate(
@@ -189,7 +190,8 @@ class TransformerEncoderLayer(nn.Module):
                 getattr(args, "moe_eval_capacity_token_fraction", 0.25),
                 getattr(args, "moe_batch_prioritized_routing", False),
                 getattr(args, "capacity_factor", 1.0),
-                moe_expert_output_masking=getattr(args, "moe_expert_output_masking", 0.0)
+                moe_expert_output_masking=getattr(args, "moe_expert_output_masking", 0.0),
+                use_moe_lang_perception=getattr(args, "use_moe_lang_perception", False)
             )
         return gate
 
@@ -236,7 +238,12 @@ class TransformerEncoderLayer(nn.Module):
                     state_dict["{}.{}.{}".format(name, new, m)] = state_dict[k]
                     del state_dict[k]
 
-    def forward(self, x, encoder_padding_mask: Optional[Tensor], attn_mask: Optional[Tensor] = None):
+    def forward(self, 
+                x, 
+                encoder_padding_mask: Optional[Tensor],
+                attn_mask: Optional[Tensor] = None,
+                lang_embeddings: Optional[Tensor] = None,
+            ):
         """
         Args:
             x (Tensor): input to the layer of shape `(seq_len, batch, embed_dim)`
@@ -289,9 +296,9 @@ class TransformerEncoderLayer(nn.Module):
             # x - seq_len, batch_size, model_dim
             x = x.transpose(0, 1) # batch_size, seq_len, model_dim
             if getattr(self.args, "use_moe_pad_mask", False):
-                x, l_aux = self.moe_layer(x, input_padding_mask=encoder_padding_mask)
+                x, l_aux = self.moe_layer(x, input_padding_mask=encoder_padding_mask, lang_embeddings=lang_embeddings)
             else:
-                x, l_aux = self.moe_layer(x)
+                x, l_aux = self.moe_layer(x, lang_embeddings=lang_embeddings)
             x = x.transpose(0, 1) # seq_len, batch_size, model_dim
         x = self.residual_connection(x, residual)
         if not self.normalize_before:
@@ -405,7 +412,8 @@ class TransformerDecoderLayer(nn.Module):
                 moe_eval_capacity_token_fraction=getattr(args, "moe_eval_capacity_token_fraction", 0.25),
                 batch_prioritized_routing=getattr(args, "moe_batch_prioritized_routing", False),
                 capacity_factor=getattr(args, "capacity_factor", 1.0),
-                moe_expert_output_masking=getattr(args, "moe_expert_output_masking", 0.0)
+                moe_expert_output_masking=getattr(args, "moe_expert_output_masking", 0.0),
+                use_moe_lang_perception=getattr(args, "use_moe_lang_perception", False)
             )
         else:
             gate = Top2Gate(
@@ -417,7 +425,8 @@ class TransformerDecoderLayer(nn.Module):
                 getattr(args, "moe_eval_capacity_token_fraction", 0.25),
                 getattr(args, "moe_batch_prioritized_routing", False),
                 getattr(args, "capacity_factor", 1.0),
-                moe_expert_output_masking=getattr(args, "moe_expert_output_masking", 0.0)
+                moe_expert_output_masking=getattr(args, "moe_expert_output_masking", 0.0),
+                use_moe_lang_perception=getattr(args, "use_moe_lang_perception", False)
             )
         return gate
 
@@ -474,6 +483,7 @@ class TransformerDecoderLayer(nn.Module):
         self_attn_padding_mask: Optional[torch.Tensor] = None,
         need_attn: bool = False,
         need_head_weights: bool = False,
+        lang_embeddings: Optional[Tensor] = None,
     ):
         """
         Args:
@@ -590,9 +600,9 @@ class TransformerDecoderLayer(nn.Module):
             # x - seq_len, batch_size, model_dim
             x = x.transpose(0, 1) # batch_size, seq_len, model_dim
             if getattr(self.args, "use_moe_pad_mask", False):
-                x, l_aux = self.moe_layer(x, input_padding_mask=self_attn_padding_mask)
+                x, l_aux = self.moe_layer(x, input_padding_mask=self_attn_padding_mask, lang_embeddings=lang_embeddings)
             else:
-                x, l_aux = self.moe_layer(x)
+                x, l_aux = self.moe_layer(x, lang_embeddings=lang_embeddings)
             x = x.transpose(0, 1) # seq_len, batch_size, model_dim
         x = self.residual_connection(x, residual)
         if not self.normalize_before:

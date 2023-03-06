@@ -19,7 +19,7 @@
                 "--langtoks-specs", "main" ,
                 "--langtoks", "{\"main\":(\"src\", \"tgt\")}" ,
                 "--sampling-method", "temperature", "--sampling-temperature", "1",
-                "--langs", "en,de", "--lang-pairs", "de-en",
+                "--langs", "en,de,fi", "--lang-pairs", "de-en,fi-en",
                 "--arch", "transformer", "--share-all-embeddings" ,
                 "--encoder-normalize-before", "--decoder-normalize-before",
                 "--encoder-layers", "3", "--decoder-layers", "3",
@@ -39,7 +39,8 @@
                 "--log-interval" ,"1",
                 "--save-dir", "/data/lsj/nfs/moe/moe_model3", "--save-interval-updates", "1000",
                 "--max-tokens", "2048",
-                "--record-a2a-perf-stats"
+                "--record-a2a-perf-stats",
+                "--enable-lang-ids", "--use-moe-lang-perception"
             ]
             // "args":[
             //     "--nproc_per_node", "6", "--master_addr", "127.0.0.1", "--master_port", "12345",

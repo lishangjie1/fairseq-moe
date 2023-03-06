@@ -37,7 +37,8 @@ train.py $DATA \
   --record-a2a-perf-stats \
   --use-moe-pad-mask \
   --moe-batch-prioritized-routing \
-  --symlink-best-and-last-checkpoints
+  --symlink-best-and-last-checkpoints \
+  --enable-lang-ids --use-moe-lang-perception
 
 # moe-eval-capacity-token-fraction # 设置为-1则在eval的时候也会使用training时候的capacity，即2*num_tokens/num_experts，这可能会导致capacity过小，丢失很多token, 使得很多token在moe layer的输出为0，即跳过moe
 # --use-moe-pad-mask 不发送pad token，可能可以降低计算成本(全0行变多了)

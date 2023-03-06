@@ -64,7 +64,8 @@ def top2gating(
     capacity_factor=1.0,
     batch_prioritized_routing=False,
     has_tutel=False,
-    eom_dropout_module=None
+    eom_dropout_module=None,
+    lp_logits=None
 ) -> Tuple[Tensor, Tensor, Tensor]:
     """Implements Top2Gating on logits."""
     if has_tutel:
@@ -77,6 +78,14 @@ def top2gating(
         orig_dtype = logits.dtype
         logits = logits.float()
     gates = F.softmax(logits, dim=1)
+    # language perception mask 
+    if lp_logits is not None:
+        lp_gates = F.softmax(lp_logits, dim=1)
+        # re-weight by lp_gates (soft mask)
+        gates = lp_gates + gates
+        gates = gates / gates.sum(1, keepdim=True)
+        # todo: hard mask
+
     metadata["entropy_gating"] = entropy(probs=gates).mean().detach()
     # gates has shape of SE
     num_tokens = gates.shape[0]
@@ -252,7 +261,8 @@ class Top2Gate(torch.nn.Module):
         moe_eval_capacity_token_fraction=0.25,
         batch_prioritized_routing=False,
         capacity_factor=1.0,
-        moe_expert_output_masking=0.0
+        moe_expert_output_masking=0.0,
+        use_moe_lang_perception=False
     ) -> None:
         super().__init__()
         self.wg = torch.nn.Linear(model_dim, num_experts, bias=False)
@@ -267,10 +277,20 @@ class Top2Gate(torch.nn.Module):
             self.moe_expert_output_masking = moe_expert_output_masking
             from fairseq.modules import FairseqDropout
             self.eom_dropout_module = FairseqDropout(self.moe_expert_output_masking, module_name=self.__class__.__name__)
-        
-    def forward(self, input: torch.Tensor=None, mask: Optional[torch.Tensor] = None, has_tutel=False, logits:torch.Tensor=None, ) -> Tuple[Tensor, Tensor, Tensor]:  # type: ignore
+        self.use_moe_lang_perception = use_moe_lang_perception
+        if self.use_moe_lang_perception:
+            # language perception module
+            self.lpg = torch.nn.Linear(model_dim, num_experts)
+    def forward(self, input: torch.Tensor=None, mask: Optional[torch.Tensor] = None, has_tutel=False, logits:torch.Tensor=None, lang_embeddings:torch.Tensor=None ) -> Tuple[Tensor, Tensor, Tensor]:  # type: ignore
         if logits is None:
             logits = self.wg(input)
+
+        if self.use_moe_lang_perception and lang_embeddings is not None:
+            assert lang_embeddings.shape == input.shape
+            lp_logits = self.lpg(lang_embeddings) # (S, E)
+        else:
+            lp_logits = None
+
         return top2gating(
             logits,
             mask,
@@ -282,5 +302,6 @@ class Top2Gate(torch.nn.Module):
             capacity_factor=self.capacity_factor,
             batch_prioritized_routing=self.batch_prioritized_routing,
             has_tutel=has_tutel,
-            eom_dropout_module=self.eom_dropout_module
+            eom_dropout_module=self.eom_dropout_module,
+            lp_logits=lp_logits
         )

@@ -262,6 +262,8 @@ class TransformerModel(FairseqEncoderDecoderModel):
                                  "if set to negative, use same as training. range: (0.0, 1.0].")
         parser.add_argument('--moe-expert-output-masking', type=float, default=0.1,
                             help="moe expert output masking (EOM) regularization strategy")
+        parser.add_argument('--use-moe-lang-perception', default=False, action='store_true',
+                            help='if true use a language perception module to partially mask moe expert')
         parser.add_argument('--capacity-factor', type=float, default=1.0,
                             help="Fraction of tokens as capacity during training")
         parser.add_argument('--moe-normalize-expert-grad', type=str, default='world_size',
@@ -385,6 +387,8 @@ class TransformerModel(FairseqEncoderDecoderModel):
         features_only: bool = False,
         alignment_layer: Optional[int] = None,
         alignment_heads: Optional[int] = None,
+        src_lang_id: Optional[Tensor] = None,
+        tgt_lang_id: Optional[Tensor] = None,
     ):
         """
         Run the forward pass for an encoder-decoder model.
@@ -393,7 +397,8 @@ class TransformerModel(FairseqEncoderDecoderModel):
         which are not supported by TorchScript.
         """
         encoder_out = self.encoder(
-            src_tokens, src_lengths=src_lengths, return_all_hiddens=return_all_hiddens
+            src_tokens, src_lengths=src_lengths, return_all_hiddens=return_all_hiddens,
+            src_lang_id=src_lang_id, tgt_lang_id=tgt_lang_id
         )
         decoder_out = self.decoder(
             prev_output_tokens,
@@ -403,6 +408,8 @@ class TransformerModel(FairseqEncoderDecoderModel):
             alignment_heads=alignment_heads,
             src_lengths=src_lengths,
             return_all_hiddens=return_all_hiddens,
+            src_lang_id=src_lang_id, 
+            tgt_lang_id=tgt_lang_id
         )
         return decoder_out
 
@@ -527,12 +534,30 @@ class TransformerEncoder(FairseqEncoder):
             x = self.quant_noise(x)
         return x, embed
 
+    def forward_torchscript(self, net_input: Dict[str, Tensor]):
+        """A TorchScript-compatible version of forward.
+
+        Encoders which use additional arguments may want to override
+        this method for TorchScript compatibility.
+        """
+        if torch.jit.is_scripting():
+            return self.forward(
+                src_tokens=net_input["src_tokens"],
+                src_lengths=net_input["src_lengths"],
+                src_lang_id=net_input.get("src_lang_id", None),
+                tgt_lang_id=net_input.get("tgt_lang_id", None)
+            )
+        else:
+            return self.forward_non_torchscript(net_input)
+        
     def forward(
         self,
         src_tokens,
         src_lengths: Optional[torch.Tensor] = None,
         return_all_hiddens: bool = False,
         token_embeddings: Optional[torch.Tensor] = None,
+        src_lang_id: Optional[Tensor] = None,
+        tgt_lang_id: Optional[Tensor] = None,
     ):
         """
         Args:
@@ -560,7 +585,9 @@ class TransformerEncoder(FairseqEncoder):
         return self.forward_scriptable(src_tokens,
                                        src_lengths,
                                        return_all_hiddens,
-                                       token_embeddings)
+                                       token_embeddings,
+                                       src_lang_id,
+                                       tgt_lang_id)
 
     # TorchScript doesn't support super() method so that the scriptable Subclass
     # can't access the base class model in Torchscript.
@@ -572,6 +599,8 @@ class TransformerEncoder(FairseqEncoder):
         src_lengths: Optional[torch.Tensor] = None,
         return_all_hiddens: bool = False,
         token_embeddings: Optional[torch.Tensor] = None,
+        src_lang_id: Optional[Tensor] = None,
+        tgt_lang_id: Optional[Tensor] = None,
     ):
         """
         Args:
@@ -601,7 +630,7 @@ class TransformerEncoder(FairseqEncoder):
         has_pads = (src_tokens.device.type == "xla" or encoder_padding_mask.any())
 
         x, encoder_embedding = self.forward_embedding(src_tokens, token_embeddings)
-
+        src_lang_embeddings = self.forward_embedding(src_lang_id)[1] if src_lang_id is not None else None
         # account for padding while computing the representation
         if has_pads:
             x = x * (1 - encoder_padding_mask.unsqueeze(-1).type_as(x))
@@ -618,7 +647,7 @@ class TransformerEncoder(FairseqEncoder):
         l_aux = []
         for layer in self.layers:
             x, l_aux_i = layer(
-                x, encoder_padding_mask=encoder_padding_mask if has_pads else None
+                x, encoder_padding_mask=encoder_padding_mask if has_pads else None, lang_embeddings=src_lang_embeddings
             )
             if return_all_hiddens:
                 assert encoder_states is not None
@@ -955,6 +984,8 @@ class TransformerDecoder(FairseqIncrementalDecoder):
         return_all_hiddens: bool = False,
         token_embeddings: Optional[torch.Tensor] = None,
         self_attn_padding_mask: Optional[Tensor] = None,
+        src_lang_id: Optional[Tensor] = None,
+        tgt_lang_id: Optional[Tensor] = None,
     ):
         """
         Includes several features from "Jointly Learning to Align and
@@ -994,6 +1025,8 @@ class TransformerDecoder(FairseqIncrementalDecoder):
             alignment_heads=alignment_heads,
             token_embeddings=token_embeddings,
             self_attn_padding_mask=self_attn_padding_mask,
+            src_lang_id=src_lang_id,
+            tgt_lang_id=tgt_lang_id,
         )
 
         if not self.training and getattr(self.args, 'record_token_expert', False):
@@ -1030,6 +1063,8 @@ class TransformerDecoder(FairseqIncrementalDecoder):
         alignment_heads: Optional[int] = None,
         token_embeddings: Optional[torch.Tensor] = None,
         self_attn_padding_mask: Optional[Tensor] = None,
+        src_lang_id: Optional[Tensor] = None,
+        tgt_lang_id: Optional[Tensor] = None,
     ):
         return self.extract_features_scriptable(
             prev_output_tokens,
@@ -1040,6 +1075,8 @@ class TransformerDecoder(FairseqIncrementalDecoder):
             alignment_heads=alignment_heads,
             token_embeddings=token_embeddings,
             self_attn_padding_mask=self_attn_padding_mask,
+            src_lang_id=src_lang_id,
+            tgt_lang_id=tgt_lang_id,
         )
 
     def extract_features_scriptable(
@@ -1052,6 +1089,8 @@ class TransformerDecoder(FairseqIncrementalDecoder):
         alignment_heads: Optional[int] = None,
         token_embeddings: Optional[Tensor] = None,
         self_attn_padding_mask: Optional[Tensor] = None,
+        src_lang_id: Optional[Tensor] = None,
+        tgt_lang_id: Optional[Tensor] = None,
     ):
         """
         A scriptable subclass of this class has an extract_features method and calls
@@ -1075,7 +1114,7 @@ class TransformerDecoder(FairseqIncrementalDecoder):
 
         # embed tokens and positions
         x, _ = self.forward_embedding(prev_output_tokens, token_embeddings, incremental_state)
-
+        tgt_lang_embeddings = self.forward_embedding(src_lang_id)[1] if tgt_lang_id is not None else None
         # B x T x C -> T x B x C
         x = x.transpose(0, 1)
 
@@ -1108,6 +1147,7 @@ class TransformerDecoder(FairseqIncrementalDecoder):
                 self_attn_padding_mask=self_attn_padding_mask,
                 need_attn=bool((idx == alignment_layer)),
                 need_head_weights=bool((idx == alignment_layer)),
+                lang_embeddings=tgt_lang_embeddings
             )
             l_aux.append(l_aux_i)
             inner_states.append(x)

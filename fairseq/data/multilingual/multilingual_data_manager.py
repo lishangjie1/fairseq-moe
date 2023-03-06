@@ -304,7 +304,7 @@ class MultilingualDatasetManager(object):
     def _shared_collater(self):
         return not (self.args.extra_data and "mono_dae" in self.args.extra_data) and (
             not self.args.lang_tok_replacing_bos_eos
-        )
+        ) and not self.args.enable_lang_ids # need create different lang ids in collater
 
     def estimate_global_pass_epoch(self, epoch):
         if self.args.virtual_epoch_size is None or self.args.virtual_data_size is None:
@@ -821,12 +821,10 @@ class MultilingualDatasetManager(object):
             tgt_dataset_transform_func=lambda dataset: tgt_dataset_transform_func(
                 src, tgt, dataset, tgt_langtok_spec
             ),
-            src_lang_id=_lang_id(lang_dictionary, src)
-            if enable_lang_ids and lang_dictionary is not None
-            else None,
-            tgt_lang_id=_lang_id(lang_dictionary, tgt)
-            if enable_lang_ids and lang_dictionary is not None
-            else None,
+            src_lang_id=src_langtok
+            if enable_lang_ids else None,
+            tgt_lang_id=tgt_langtok 
+            if enable_lang_ids else None,
             langpairs_sharing_datasets=langpairs_sharing_datasets,
         )
         # TODO: handle modified lang toks for mined data and dae data
