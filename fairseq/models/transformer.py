@@ -260,7 +260,7 @@ class TransformerModel(FairseqEncoderDecoderModel):
         parser.add_argument('--moe-eval-capacity-token-fraction', type=float, default=0.25,
                             help="Fraction of tokens as capacity during validation" + \
                                  "if set to negative, use same as training. range: (0.0, 1.0].")
-        parser.add_argument('--moe-expert-output-masking', type=float, default=0.1,
+        parser.add_argument('--moe-expert-output-masking', type=float, default=0.0,
                             help="moe expert output masking (EOM) regularization strategy")
         parser.add_argument('--capacity-factor', type=float, default=1.0,
                             help="Fraction of tokens as capacity during training")
