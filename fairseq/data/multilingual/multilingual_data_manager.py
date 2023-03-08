@@ -304,7 +304,7 @@ class MultilingualDatasetManager(object):
     def _shared_collater(self):
         return not (self.args.extra_data and "mono_dae" in self.args.extra_data) and (
             not self.args.lang_tok_replacing_bos_eos
-        ) and not self.args.enable_lang_ids # need create different lang ids in collater
+        )
 
     def estimate_global_pass_epoch(self, epoch):
         if self.args.virtual_epoch_size is None or self.args.virtual_data_size is None:

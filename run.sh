@@ -1,13 +1,13 @@
-NUM_EXPERTS=6
+NUM_EXPERTS=4
 max_tokens=3000
 max_updates=50000
 #DATA="/data/lsj/nfs/it_experiment/data/general_data/text_data/enfr"
 DATA="/data/lsj/nfs/moe/moe_data"
 SAVE="/data/lsj/nfs/moe/moe_model3"
-lang_pairs="fi-en" #,es-en,fi-en,hi-en,ru-en,zh-en,en-de,en-es,en-fi,en-hi,en-ru,en-zh"
-lang_dict="en,fi" #,es,fi,hi,ru,zh"
-export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5
-python -m torch.distributed.launch --nproc_per_node=6 --master_addr="127.0.0.1" --master_port=12345 \
+lang_pairs="fi-en,hi-en" #,es-en,fi-en,hi-en,ru-en,zh-en,en-de,en-es,en-fi,en-hi,en-ru,en-zh"
+lang_dict="en,fi,hi" #,es,fi,hi,ru,zh"
+export CUDA_VISIBLE_DEVICES=0,1
+python -m torch.distributed.launch --nproc_per_node=2 --master_addr="127.0.0.1" --master_port=12345 \
 train.py $DATA \
   --ddp-backend fully_sharded --fp16 \
   --task translation_multi_simple_epoch \

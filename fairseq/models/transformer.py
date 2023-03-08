@@ -260,7 +260,7 @@ class TransformerModel(FairseqEncoderDecoderModel):
         parser.add_argument('--moe-eval-capacity-token-fraction', type=float, default=0.25,
                             help="Fraction of tokens as capacity during validation" + \
                                  "if set to negative, use same as training. range: (0.0, 1.0].")
-        parser.add_argument('--moe-expert-output-masking', type=float, default=0.1,
+        parser.add_argument('--moe-expert-output-masking', type=float, default=0.0,
                             help="moe expert output masking (EOM) regularization strategy")
         parser.add_argument('--use-moe-lang-perception', default=False, action='store_true',
                             help='if true use a language perception module to partially mask moe expert')
@@ -630,7 +630,7 @@ class TransformerEncoder(FairseqEncoder):
         has_pads = (src_tokens.device.type == "xla" or encoder_padding_mask.any())
 
         x, encoder_embedding = self.forward_embedding(src_tokens, token_embeddings)
-        src_lang_embeddings = self.forward_embedding(src_lang_id)[1] if src_lang_id is not None else None
+        src_lang_embeddings = self.forward_embedding(src_lang_id.unsqueeze(1))[1] if src_lang_id is not None else None
         # account for padding while computing the representation
         if has_pads:
             x = x * (1 - encoder_padding_mask.unsqueeze(-1).type_as(x))
@@ -962,7 +962,7 @@ class TransformerDecoder(FairseqIncrementalDecoder):
             x = self.project_in_dim(x)
 
         if positions is not None:
-            x += positions
+            x = x + positions
 
         if self.layernorm_embedding is not None:
             x = self.layernorm_embedding(x)
@@ -1114,7 +1114,8 @@ class TransformerDecoder(FairseqIncrementalDecoder):
 
         # embed tokens and positions
         x, _ = self.forward_embedding(prev_output_tokens, token_embeddings, incremental_state)
-        tgt_lang_embeddings = self.forward_embedding(src_lang_id)[1] if tgt_lang_id is not None else None
+        tgt_lang_embeddings = self.forward_embedding(tgt_lang_id.unsqueeze(1))[1] if tgt_lang_id is not None else None
+        
         # B x T x C -> T x B x C
         x = x.transpose(0, 1)
 

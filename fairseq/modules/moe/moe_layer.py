@@ -183,7 +183,8 @@ class MOELayer(Base):
         
         lang_embeddings = kwargs.get("lang_embeddings", None)
         if lang_embeddings is not None:
-            assert lang_embeddings.shape[0] == input_shape[0], lang_embeddings.shape[2] == input_shape[2]
+            assert lang_embeddings.shape[0] == input_shape[0], f"{lang_embeddings.shape}, {input_shape}"
+            assert lang_embeddings.shape[2] == input_shape[2], f"{lang_embeddings.shape}, {input_shape}"
             lang_embeddings = lang_embeddings.expand(input_shape).reshape(-1, d_model)
             padded_lang_embeddings = torch.zeros(
                 (expected_dim, lang_embeddings.shape[1]),
