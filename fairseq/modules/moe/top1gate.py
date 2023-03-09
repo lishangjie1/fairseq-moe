@@ -139,7 +139,6 @@ class Top1Gate(torch.nn.Module):
         batch_prioritized_routing=False,
         moe_expert_output_masking=0.0,
         use_moe_lang_perception=False
-        
     ) -> None:
         # TODO: merge this to top2gate.py
         #
