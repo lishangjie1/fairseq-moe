@@ -1,14 +1,14 @@
 
-export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5 
+export CUDA_VISIBLE_DEVICES=0,1
 models="/data/lsj/nfs/moe/moe_model3"
 DATA="/data/lsj/nfs/moe/moe_data"
-src="de"
+src="hi"
 tgt="en"
 max_tokens=4096
 resdir="/data/lsj/nfs/moe/moe_res"
-lang_dict="en,de" #,es,fi,hi,ru,zh"
+lang_dict="en,fi,hi" #,es,fi,hi,ru,zh"
 
-python -m torch.distributed.launch --nproc_per_node=6 --master_addr="127.0.0.1" --master_port=12345 \
+python -m torch.distributed.launch --nproc_per_node=2 --master_addr="127.0.0.1" --master_port=12345 \
 generate.py $DATA \
 --task translation_multi_simple_epoch \
 -s "$src" -t "$tgt" \
@@ -17,5 +17,6 @@ generate.py $DATA \
 --max-tokens "$max_tokens" --beam 3 --sacrebleu \
 --remove-bpe --results-path $resdir \
 --langtoks-specs "main" \
---langtoks "{\"main\":(\"src\", \"tgt\")}"
+--langtoks "{\"main\":(\"src\", \"tgt\")}" \
+--enable-lang-ids
 

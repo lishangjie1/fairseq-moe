@@ -1,13 +1,13 @@
-NUM_EXPERTS=6
+NUM_EXPERTS=4
 max_tokens=3000
 max_updates=50000
 #DATA="/data/lsj/nfs/it_experiment/data/general_data/text_data/enfr"
 DATA="/data/lsj/nfs/moe/moe_data"
 SAVE="/data/lsj/nfs/moe/moe_model3"
-lang_pairs="fi-en" #,es-en,fi-en,hi-en,ru-en,zh-en,en-de,en-es,en-fi,en-hi,en-ru,en-zh"
-lang_dict="en,fi" #,es,fi,hi,ru,zh"
-export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5
-python -m torch.distributed.launch --nproc_per_node=6 --master_addr="127.0.0.1" --master_port=12345 \
+lang_pairs="fi-en,hi-en" #,es-en,fi-en,hi-en,ru-en,zh-en,en-de,en-es,en-fi,en-hi,en-ru,en-zh"
+lang_dict="en,fi,hi" #,es,fi,hi,ru,zh"
+export CUDA_VISIBLE_DEVICES=0,1
+python -m torch.distributed.launch --nproc_per_node=2 --master_addr="127.0.0.1" --master_port=12345 \
 train.py $DATA \
   --ddp-backend fully_sharded --fp16 \
   --task translation_multi_simple_epoch \
@@ -37,7 +37,8 @@ train.py $DATA \
   --record-a2a-perf-stats \
   --use-moe-pad-mask \
   --moe-batch-prioritized-routing \
-  --symlink-best-and-last-checkpoints
+  --symlink-best-and-last-checkpoints \
+  --enable-lang-ids --use-moe-lang-perception
 
 # moe-eval-capacity-token-fraction # 设置为-1则在eval的时候也会使用training时候的capacity，即2*num_tokens/num_experts，这可能会导致capacity过小，丢失很多token, 使得很多token在moe layer的输出为0，即跳过moe
 # --use-moe-pad-mask 不发送pad token，可能可以降低计算成本(全0行变多了)

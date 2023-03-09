@@ -313,6 +313,10 @@ class SequenceGenerator(nn.Module):
         else:
             original_batch_idxs = torch.arange(0, bsz).type_as(tokens)
 
+        tgt_lang_id = net_input.get("tgt_lang_id", None)
+        # expand beam size
+        if tgt_lang_id is not None:
+            tgt_lang_id = tgt_lang_id.unsqueeze(1).expand(-1, beam_size).reshape(-1)
         for step in range(max_len + 1):  # one extra step for EOS marker
             # reorder decoder internal states based on the prev choice of beams
             if reorder_state is not None:
@@ -329,12 +333,12 @@ class SequenceGenerator(nn.Module):
                 encoder_outs = self.model.reorder_encoder_out(
                     encoder_outs, reorder_state
                 )
-
             lprobs, avg_attn_scores = self.model.forward_decoder(
                 tokens[:, : step + 1],
                 encoder_outs,
                 incremental_states,
                 self.temperature,
+                tgt_lang_id=tgt_lang_id
             )
 
             if self.lm_model is not None:
@@ -499,6 +503,8 @@ class SequenceGenerator(nn.Module):
 
                 scores = scores.view(bsz, -1)[batch_idxs].view(new_bsz * beam_size, -1)
                 tokens = tokens.view(bsz, -1)[batch_idxs].view(new_bsz * beam_size, -1)
+                if tgt_lang_id is not None:
+                    tgt_lang_id = tgt_lang_id.view(bsz, -1)[batch_idxs].view(new_bsz * beam_size)
                 if attn is not None:
                     attn = attn.view(bsz, -1)[batch_idxs].view(
                         new_bsz * beam_size, attn.size(1), -1
@@ -798,6 +804,7 @@ class EnsembleModel(nn.Module):
         encoder_outs: List[Dict[str, List[Tensor]]],
         incremental_states: List[Dict[str, Dict[str, Optional[Tensor]]]],
         temperature: float = 1.0,
+        tgt_lang_id: Optional[Tensor] = None,
     ):
         log_probs = []
         avg_attn: Optional[Tensor] = None
@@ -811,9 +818,10 @@ class EnsembleModel(nn.Module):
                     tokens,
                     encoder_out=encoder_out,
                     incremental_state=incremental_states[i],
+                    tgt_lang_id=tgt_lang_id
                 )
             else:
-                decoder_out = model.decoder.forward(tokens, encoder_out=encoder_out)
+                decoder_out = model.decoder.forward(tokens, encoder_out=encoder_out, tgt_lang_id=tgt_lang_id)
 
             attn: Optional[Tensor] = None
             decoder_len = len(decoder_out)
