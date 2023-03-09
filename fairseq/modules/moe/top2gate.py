@@ -65,7 +65,8 @@ def top2gating(
     batch_prioritized_routing=False,
     has_tutel=False,
     eom_dropout_module=None,
-    lp_logits=None
+    lp_logits=None,
+    mix_ratio=None
 ) -> Tuple[Tensor, Tensor, Tensor]:
     """Implements Top2Gating on logits."""
     if has_tutel:
@@ -81,10 +82,10 @@ def top2gating(
     # language perception mask 
     if lp_logits is not None:
         lp_gates = F.softmax(lp_logits, dim=1)
-        # re-weight by lp_gates (soft mask)
-        gates = lp_gates + gates
+        # mixed by lp_gates
+        gates = mix_ratio * lp_gates + (1 - mix_ratio) * gates
         gates = gates / gates.sum(1, keepdim=True)
-        # todo: hard mask
+        
 
     metadata["entropy_gating"] = entropy(probs=gates).mean().detach()
     # gates has shape of SE
@@ -232,6 +233,17 @@ def top2gating(
     else:
         return l_aux, combine_weights, dispatch_mask, metadata
 
+class MixGate(torch.nn.Module):
+
+    def __init__(self, dim):
+        super().__init__()
+        self.W_lang = torch.nn.Linear(dim, 1)
+        self.W_tok = torch.nn.Linear(dim, 1)
+        self.sigmoid = torch.nn.Sigmoid()
+
+    def forward(self, h_lang, h_tok):
+        return self.sigmoid(self.W_lang(h_lang) + self.W_tok(h_tok))
+
 
 class Top2Gate(torch.nn.Module):
     """Gate module which implements Top2Gating as described in Gshard_.
@@ -281,6 +293,7 @@ class Top2Gate(torch.nn.Module):
         if self.use_moe_lang_perception:
             # language perception module
             self.lpg = torch.nn.Linear(model_dim, num_experts)
+            self.mix_gate = MixGate(model_dim)
     def forward(self, input: torch.Tensor=None, mask: Optional[torch.Tensor] = None, has_tutel=False, logits:torch.Tensor=None, lang_embeddings:torch.Tensor=None ) -> Tuple[Tensor, Tensor, Tensor]:  # type: ignore
         if logits is None:
             logits = self.wg(input)
@@ -288,8 +301,10 @@ class Top2Gate(torch.nn.Module):
         if self.use_moe_lang_perception and lang_embeddings is not None:
             assert lang_embeddings.shape == input.shape
             lp_logits = self.lpg(lang_embeddings) # (S, E)
+            mix_ratio = self.mix_gate(lang_embeddings, input)
         else:
             lp_logits = None
+            mix_ratio = None
 
         return top2gating(
             logits,
@@ -303,5 +318,6 @@ class Top2Gate(torch.nn.Module):
             batch_prioritized_routing=self.batch_prioritized_routing,
             has_tutel=has_tutel,
             eom_dropout_module=self.eom_dropout_module,
-            lp_logits=lp_logits
+            lp_logits=lp_logits,
+            mix_ratio=mix_ratio
         )
