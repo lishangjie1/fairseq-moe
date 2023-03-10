@@ -168,7 +168,16 @@ def top2gating(
     ce = torch.mean(mask1.to(gates.dtype), dim=0)
     l_aux = torch.mean(me * ce)
     l_aux = l_aux * num_experts * num_experts
+    # balance load loss for language perception
+    if lp_logits is not None:
+        me_lp = torch.mean(lp_gates, dim=0)
+        indices1_lp = torch.argmax(lp_gates, dim=1, keepdim=True)
+        mask_lp = one_hot(indices1_lp, num_experts)
+        ce_lp = torch.mean(mask_lp.to(lp_gates.dtype), dim=0)
+        l_aux_lp = torch.mean(me_lp * ce_lp)
+        l_aux_lp = l_aux_lp * num_experts * num_experts
 
+        l_aux += l_aux_lp
 
     # for logging purposes
     metadata["overflow_expert1"] = 100 * torch.sum(mask1 * torch.ge(locations1, capacity)) / torch.sum(mask1)
