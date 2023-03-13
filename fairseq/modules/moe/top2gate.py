@@ -66,6 +66,7 @@ def top2gating(
     has_tutel=False,
     eom_dropout_module=None,
     lp_logits=None,
+    num_updates=None
 ) -> Tuple[Tensor, Tensor, Tensor]:
     """Implements Top2Gating on logits."""
     if has_tutel:
@@ -81,9 +82,9 @@ def top2gating(
     # language perception mask 
     if lp_logits is not None:
         lp_gates = F.softmax(lp_logits, dim=1)
-        # mask bottom 25%
+        mask_ratio = min(0.05 * int(num_updates / 5000), 0.25)
         lp_mask = torch.ones_like(lp_gates)
-        mask_num = int(lp_gates.shape[1] * 0.25)
+        mask_num = int(lp_gates.shape[1] * mask_ratio)
         lp_mask[(torch.arange(len(lp_gates)).unsqueeze(1), lp_gates.topk(mask_num, largest=False).indices)] = 0.0
         logits = logits.masked_fill(~lp_mask.bool(), float("-inf"))
         gates = F.softmax(logits, dim=1)
@@ -295,7 +296,7 @@ class Top2Gate(torch.nn.Module):
         batch_prioritized_routing=False,
         capacity_factor=1.0,
         moe_expert_output_masking=0.0,
-        use_moe_lang_perception=False
+        use_moe_lang_perception=False,
     ) -> None:
         super().__init__()
         self.wg = torch.nn.Linear(model_dim, num_experts, bias=False)
@@ -315,7 +316,7 @@ class Top2Gate(torch.nn.Module):
             # language perception module
             self.lpg = torch.nn.Linear(model_dim, num_experts)
             # self.mix_gate = MixGate(model_dim)
-    def forward(self, input: torch.Tensor=None, mask: Optional[torch.Tensor] = None, has_tutel=False, logits:torch.Tensor=None, lang_embeddings:torch.Tensor=None ) -> Tuple[Tensor, Tensor, Tensor]:  # type: ignore
+    def forward(self, input: torch.Tensor=None, mask: Optional[torch.Tensor] = None, has_tutel=False, logits:torch.Tensor=None, lang_embeddings:torch.Tensor=None, num_updates=None ) -> Tuple[Tensor, Tensor, Tensor]:  # type: ignore
         if logits is None:
             logits = self.wg(input)
 
@@ -340,4 +341,5 @@ class Top2Gate(torch.nn.Module):
             has_tutel=has_tutel,
             eom_dropout_module=self.eom_dropout_module,
             lp_logits=lp_logits,
+            num_updates=num_updates
         )
