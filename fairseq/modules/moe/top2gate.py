@@ -82,18 +82,15 @@ def top2gating(
     # language perception mask 
     if lp_logits is not None:
         mask_ratio = min(0.05 * int(num_updates / 5000), 0.25)
-        if mask_ratio > 0:
-            lp_gates = F.softmax(lp_logits, dim=1)
-            lp_mask = torch.ones_like(lp_gates)
-            mask_num = int(lp_gates.shape[1] * mask_ratio)
-            lp_mask[(torch.arange(len(lp_gates)).unsqueeze(1), lp_gates.topk(mask_num, largest=False).indices)] = 0.0
-            logits = logits.masked_fill(~lp_mask.bool(), float("-inf"))
-            gates = F.softmax(logits, dim=1)
-            # Straight through
-            lp_mask = lp_mask - lp_gates.detach() + lp_gates
-            gates = lp_mask * gates
-        else:
-            gates = F.softmax(logits, dim=1)
+        lp_gates = F.softmax(lp_logits, dim=1)
+        lp_mask = torch.ones_like(lp_gates)
+        mask_num = int(lp_gates.shape[1] * mask_ratio)
+        lp_mask[(torch.arange(len(lp_gates)).unsqueeze(1), lp_gates.topk(mask_num, largest=False).indices)] = 0.0
+        logits = logits.masked_fill(~lp_mask.bool(), float("-inf"))
+        gates = F.softmax(logits, dim=1)
+        # Straight through
+        lp_mask = lp_mask - lp_gates.detach() + lp_gates
+        gates = lp_mask * gates
 
     else:
         gates = F.softmax(logits, dim=1)
@@ -175,7 +172,6 @@ def top2gating(
         ce_lp = torch.mean(mask_lp.to(lp_gates.dtype), dim=0)
         l_aux_lp = torch.mean(me_lp * ce_lp)
         l_aux_lp = l_aux_lp * num_experts * num_experts
-
         l_aux += l_aux_lp
 
     # for logging purposes
