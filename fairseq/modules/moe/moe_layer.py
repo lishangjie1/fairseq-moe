@@ -109,8 +109,6 @@ class MOELayer(Base):
         self.use_tutel=getattr(args, 'use_tutel', False) and has_tutel
         self.use_tutel_all2all=getattr(args, 'use_tutel_all2all', False) and has_tutel
     
-    def set_num_updates(self, num_updates):
-        self.num_updates = num_updates
 
     def forward(self, *input: Tensor, input_padding_mask=None, **kwargs: Any) -> Tensor:
         assert len(input) == 1, "only single input Tensor supported"
@@ -204,7 +202,7 @@ class MOELayer(Base):
             self._tutel_dispatcher.update(indices_, locations_, gates_, capacity=C)
             dispatched_input = self._tutel_dispatcher.encode(reshaped_input)
         else:
-            l_aux, combine_weights, dispatch_mask, self.metadata = self.gate(reshaped_input, reshaped_input_padding_mask, has_tutel=False, lang_embeddings=lang_embeddings, num_updates=self.num_updates)
+            l_aux, combine_weights, dispatch_mask, self.metadata = self.gate(reshaped_input, reshaped_input_padding_mask, has_tutel=False, lang_embeddings=lang_embeddings)
 
             dispatch_mask = dispatch_mask.to(input.dtype).permute(1, 2, 0)  # S,E,C -> E,C,S
             E, C, S = dispatch_mask.size()

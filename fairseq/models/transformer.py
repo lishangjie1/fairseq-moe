@@ -34,6 +34,7 @@ from fairseq.modules.checkpoint_activations import checkpoint_wrapper
 from fairseq.modules.quant_noise import quant_noise as apply_quant_noise_
 from torch import Tensor
 import logging
+from fairseq.modules.moe.share_mem import share_mem
 logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_SOURCE_POSITIONS = 1024
@@ -264,6 +265,16 @@ class TransformerModel(FairseqEncoderDecoderModel):
                             help="moe expert output masking (EOM) regularization strategy")
         parser.add_argument('--use-moe-lang-perception', default=False, action='store_true',
                             help='if true use a language perception module to partially mask moe expert')
+        parser.add_argument('--use-encoder-moe-lang-perception', default=False, action='store_true',
+                            help='if true use a language perception module to partially mask moe expert')
+        parser.add_argument('--use-decoder-moe-lang-perception', default=False, action='store_true',
+                            help='if true use a language perception module to partially mask moe expert')
+        parser.add_argument('--moe-lang-perception-ratio', type=float, default=0.25,
+                            help="ratio of language perception mask")
+        parser.add_argument('--moe-lang-perception-warmup', type=int, default=20000,
+                            help="warm up for language perception")
+        parser.add_argument('--moe-lang-perception-outlier-threshold', type=float, default=0.01,
+                            help="Expert will be masked if its weight in language perception is smaller than threshold")
         parser.add_argument('--capacity-factor', type=float, default=1.0,
                             help="Fraction of tokens as capacity during training")
         parser.add_argument('--moe-normalize-expert-grad', type=str, default='world_size',
@@ -631,6 +642,9 @@ class TransformerEncoder(FairseqEncoder):
 
         x, encoder_embedding = self.forward_embedding(src_tokens, token_embeddings)
         src_lang_embeddings = self.forward_embedding(src_lang_id.unsqueeze(1))[1] if src_lang_id is not None else None
+        # record lang id
+        share_mem('is_encoder', True)
+        share_mem('lang_id', self.dictionary.symbols[src_lang_id[0]])
         # account for padding while computing the representation
         if has_pads:
             x = x * (1 - encoder_padding_mask.unsqueeze(-1).type_as(x))
@@ -1115,7 +1129,8 @@ class TransformerDecoder(FairseqIncrementalDecoder):
         # embed tokens and positions
         x, _ = self.forward_embedding(prev_output_tokens, token_embeddings, incremental_state)
         tgt_lang_embeddings = self.forward_embedding(tgt_lang_id.unsqueeze(1))[1] if tgt_lang_id is not None else None
-        
+        share_mem('is_encoder', False)
+        share_mem('lang_id', self.dictionary.symbols[tgt_lang_id[0]])
         # B x T x C -> T x B x C
         x = x.transpose(0, 1)
 

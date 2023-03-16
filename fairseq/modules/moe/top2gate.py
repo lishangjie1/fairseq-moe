@@ -18,7 +18,7 @@ import torch
 from torch import Tensor
 from torch.distributions import Categorical
 import torch.nn.functional as F
-
+from .share_mem import share_mem
 
 gumbel_map: Dict[torch.device, Callable] = {}
 
@@ -66,7 +66,10 @@ def top2gating(
     has_tutel=False,
     eom_dropout_module=None,
     lp_logits=None,
-    num_updates=None
+    num_updates=None,
+    moe_lang_perception_ratio=0.25,
+    moe_lang_perception_warmup=None,
+    moe_lang_perception_outlier_threshold=0.01
 ) -> Tuple[Tensor, Tensor, Tensor]:
     """Implements Top2Gating on logits."""
     if has_tutel:
@@ -81,11 +84,17 @@ def top2gating(
     
     # language perception mask 
     if lp_logits is not None:
-        mask_ratio = min(0.05 * int(num_updates / 5000), 0.25)
+        if num_updates is not None and moe_lang_perception_warmup is not None and num_updates < moe_lang_perception_warmup:
+            mask_ratio = moe_lang_perception_ratio * num_updates / moe_lang_perception_warmup
+        else:
+            mask_ratio = moe_lang_perception_ratio
         lp_gates = F.softmax(lp_logits, dim=1)
         lp_mask = torch.ones_like(lp_gates)
         mask_num = int(lp_gates.shape[1] * mask_ratio)
-        lp_mask[(torch.arange(len(lp_gates)).unsqueeze(1), lp_gates.topk(mask_num, largest=False).indices)] = 0.0
+        if mask_num > 0:
+            lp_mask[(torch.arange(len(lp_gates)).unsqueeze(1), lp_gates.topk(mask_num, largest=False).indices)] = 0.0
+        # recover lp_mask if gate value > threshold
+        lp_mask[lp_gates > moe_lang_perception_outlier_threshold] = 1.0
         logits = logits.masked_fill(~lp_mask.bool(), float("-inf"))
         gates = F.softmax(logits, dim=1)
         # Straight through
@@ -291,6 +300,9 @@ class Top2Gate(torch.nn.Module):
         capacity_factor=1.0,
         moe_expert_output_masking=0.0,
         use_moe_lang_perception=False,
+        moe_lang_perception_ratio=0.25,
+        moe_lang_perception_warmup=None,
+        moe_lang_perception_outlier_threshold=0.01
     ) -> None:
         super().__init__()
         self.wg = torch.nn.Linear(model_dim, num_experts, bias=False)
@@ -310,7 +322,14 @@ class Top2Gate(torch.nn.Module):
             # language perception module
             self.lpg = torch.nn.Linear(model_dim, num_experts)
             # self.mix_gate = MixGate(model_dim)
-    def forward(self, input: torch.Tensor=None, mask: Optional[torch.Tensor] = None, has_tutel=False, logits:torch.Tensor=None, lang_embeddings:torch.Tensor=None, num_updates=None ) -> Tuple[Tensor, Tensor, Tensor]:  # type: ignore
+        
+        self.moe_lang_perception_ratio = moe_lang_perception_ratio
+        self.moe_lang_perception_warmup = moe_lang_perception_warmup
+        self.moe_lang_perception_outlier_threshold = moe_lang_perception_outlier_threshold
+    def set_num_updates(self, num_updates):
+        self.num_updates = num_updates
+
+    def forward(self, input: torch.Tensor=None, mask: Optional[torch.Tensor] = None, has_tutel=False, logits:torch.Tensor=None, lang_embeddings:torch.Tensor=None) -> Tuple[Tensor, Tensor, Tensor]:  # type: ignore
         if logits is None:
             logits = self.wg(input)
 
@@ -335,5 +354,8 @@ class Top2Gate(torch.nn.Module):
             has_tutel=has_tutel,
             eom_dropout_module=self.eom_dropout_module,
             lp_logits=lp_logits,
-            num_updates=num_updates
+            num_updates=self.num_updates if self.training else None,
+            moe_lang_perception_ratio=self.moe_lang_perception_ratio,
+            moe_lang_perception_warmup=self.moe_lang_perception_warmup,
+            moe_lang_perception_outlier_threshold=self.moe_lang_perception_outlier_threshold
         )

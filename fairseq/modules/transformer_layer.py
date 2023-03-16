@@ -178,7 +178,7 @@ class TransformerEncoderLayer(nn.Module):
                 batch_prioritized_routing=getattr(args, "moe_batch_prioritized_routing", False),
                 capacity_factor=getattr(args, "capacity_factor", 1.0),
                 moe_expert_output_masking=getattr(args, "moe_expert_output_masking", 0.0),
-                use_moe_lang_perception=getattr(args, "use_moe_lang_perception", False)
+                use_moe_lang_perception=getattr(args, "use_moe_lang_perception", False) or getattr(args, "use_encoder_moe_lang_perception", False)
             )
         else:
             gate = Top2Gate(
@@ -191,7 +191,10 @@ class TransformerEncoderLayer(nn.Module):
                 getattr(args, "moe_batch_prioritized_routing", False),
                 getattr(args, "capacity_factor", 1.0),
                 moe_expert_output_masking=getattr(args, "moe_expert_output_masking", 0.0),
-                use_moe_lang_perception=getattr(args, "use_moe_lang_perception", False)
+                use_moe_lang_perception=getattr(args, "use_moe_lang_perception", False) or getattr(args, "use_encoder_moe_lang_perception", False),
+                moe_lang_perception_ratio=getattr(args, "moe_lang_perception_ratio", 0.25),
+                moe_lang_perception_warmup=getattr(args, "moe_lang_perception_warmup", 20000),
+                moe_lang_perception_outlier_threshold=getattr(args, "moe_lang_perception_outlier_threshold", 0.01),
             )
         return gate
 
@@ -413,7 +416,7 @@ class TransformerDecoderLayer(nn.Module):
                 batch_prioritized_routing=getattr(args, "moe_batch_prioritized_routing", False),
                 capacity_factor=getattr(args, "capacity_factor", 1.0),
                 moe_expert_output_masking=getattr(args, "moe_expert_output_masking", 0.0),
-                use_moe_lang_perception=getattr(args, "use_moe_lang_perception", False)
+                use_moe_lang_perception=getattr(args, "use_moe_lang_perception", False) or getattr(args, "use_decoder_moe_lang_perception", False)
             )
         else:
             gate = Top2Gate(
@@ -426,7 +429,10 @@ class TransformerDecoderLayer(nn.Module):
                 getattr(args, "moe_batch_prioritized_routing", False),
                 getattr(args, "capacity_factor", 1.0),
                 moe_expert_output_masking=getattr(args, "moe_expert_output_masking", 0.0),
-                use_moe_lang_perception=getattr(args, "use_moe_lang_perception", False)
+                use_moe_lang_perception=getattr(args, "use_moe_lang_perception", False) or getattr(args, "use_decoder_moe_lang_perception", False),
+                moe_lang_perception_ratio=getattr(args, "moe_lang_perception_ratio", 0.25),
+                moe_lang_perception_warmup=getattr(args, "moe_lang_perception_warmup", 20000),
+                moe_lang_perception_outlier_threshold=getattr(args, "moe_lang_perception_outlier_threshold", 0.01),
             )
         return gate
 
