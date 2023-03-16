@@ -271,7 +271,7 @@ class TransformerModel(FairseqEncoderDecoderModel):
                             help='if true use a language perception module to partially mask moe expert')
         parser.add_argument('--moe-lang-perception-ratio', type=float, default=0.25,
                             help="ratio of language perception mask")
-        parser.add_argument('--moe-lang-perception-warmup', type=int, default=20000,
+        parser.add_argument('--moe-lang-perception-warmup', type=int, default=40000,
                             help="warm up for language perception")
         parser.add_argument('--moe-lang-perception-outlier-threshold', type=float, default=0.01,
                             help="Expert will be masked if its weight in language perception is smaller than threshold")
