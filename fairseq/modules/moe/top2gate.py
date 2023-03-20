@@ -65,11 +65,6 @@ def top2gating(
     batch_prioritized_routing=False,
     has_tutel=False,
     eom_dropout_module=None,
-    lp_logits=None,
-    num_updates=None,
-    moe_lang_perception_ratio=0.25,
-    moe_lang_perception_warmup=None,
-    moe_lang_perception_outlier_threshold=0.01
 ) -> Tuple[Tensor, Tensor, Tensor]:
     """Implements Top2Gating on logits."""
     if has_tutel:
@@ -83,26 +78,26 @@ def top2gating(
         logits = logits.float()
     
     # language perception mask 
-    if lp_logits is not None:
-        if num_updates is not None and moe_lang_perception_warmup is not None and num_updates < moe_lang_perception_warmup:
-            mask_ratio = moe_lang_perception_ratio * num_updates / moe_lang_perception_warmup
-        else:
-            mask_ratio = moe_lang_perception_ratio
-        lp_gates = F.softmax(lp_logits, dim=1)
-        lp_mask = torch.ones_like(lp_gates)
-        mask_num = int(lp_gates.shape[1] * mask_ratio)
-        if mask_num > 0:
-            lp_mask[(torch.arange(len(lp_gates)).unsqueeze(1), lp_gates.topk(mask_num, largest=False).indices)] = 0.0
-        # recover lp_mask if gate value > threshold
-        lp_mask[lp_gates > moe_lang_perception_outlier_threshold] = 1.0
-        logits = logits.masked_fill(~lp_mask.bool(), float("-inf"))
-        gates = F.softmax(logits, dim=1)
-        # Straight through
-        lp_mask = lp_mask - lp_gates.detach() + lp_gates
-        gates = lp_mask * gates
+    # if lp_logits is not None:
+    #     if num_updates is not None and moe_lang_perception_warmup is not None and num_updates < moe_lang_perception_warmup:
+    #         mask_ratio = moe_lang_perception_ratio * num_updates / moe_lang_perception_warmup
+    #     else:
+    #         mask_ratio = moe_lang_perception_ratio
+    #     lp_gates = F.softmax(lp_logits, dim=1)
+    #     lp_mask = torch.ones_like(lp_gates)
+    #     mask_num = int(lp_gates.shape[1] * mask_ratio)
+    #     if mask_num > 0:
+    #         lp_mask[(torch.arange(len(lp_gates)).unsqueeze(1), lp_gates.topk(mask_num, largest=False).indices)] = 0.0
+    #     # recover lp_mask if gate value > threshold
+    #     lp_mask[lp_gates > moe_lang_perception_outlier_threshold] = 1.0
+    #     logits = logits.masked_fill(~lp_mask.bool(), float("-inf"))
+    #     gates = F.softmax(logits, dim=1)
+    #     # Straight through
+    #     lp_mask = lp_mask - lp_gates.detach() + lp_gates
+    #     gates = lp_mask * gates
 
-    else:
-        gates = F.softmax(logits, dim=1)
+    # else:
+    gates = F.softmax(logits, dim=1)
         
     metadata["entropy_gating"] = entropy(probs=gates).mean().detach()
     # gates has shape of SE
@@ -174,14 +169,14 @@ def top2gating(
     l_aux = torch.mean(me * ce)
     l_aux = l_aux * num_experts * num_experts
     # balance load loss for language perception
-    if lp_logits is not None:
-        me_lp = torch.mean(lp_gates, dim=0)
-        indices1_lp = torch.argmax(lp_gates, dim=1, keepdim=True)
-        mask_lp = one_hot(indices1_lp, num_experts)
-        ce_lp = torch.mean(mask_lp.to(lp_gates.dtype), dim=0)
-        l_aux_lp = torch.mean(me_lp * ce_lp)
-        l_aux_lp = l_aux_lp * num_experts * num_experts
-        l_aux += l_aux_lp
+    # if lp_logits is not None:
+    #     me_lp = torch.mean(lp_gates, dim=0)
+    #     indices1_lp = torch.argmax(lp_gates, dim=1, keepdim=True)
+    #     mask_lp = one_hot(indices1_lp, num_experts)
+    #     ce_lp = torch.mean(mask_lp.to(lp_gates.dtype), dim=0)
+    #     l_aux_lp = torch.mean(me_lp * ce_lp)
+    #     l_aux_lp = l_aux_lp * num_experts * num_experts
+    #     l_aux += l_aux_lp
 
     # for logging purposes
     metadata["overflow_expert1"] = 100 * torch.sum(mask1 * torch.ge(locations1, capacity)) / torch.sum(mask1)
@@ -305,7 +300,10 @@ class Top2Gate(torch.nn.Module):
         moe_lang_perception_outlier_threshold=0.01
     ) -> None:
         super().__init__()
-        self.wg = torch.nn.Linear(model_dim, num_experts, bias=False)
+        if use_moe_lang_perception:
+            self.wg = torch.nn.Linear(3*model_dim, num_experts, bias=False)
+        else:
+            self.wg = torch.nn.Linear(model_dim, num_experts, bias=False)
         self.use_fp32 = use_fp32
         self.second_expert_policy = second_expert_policy
         self.normalize_gate_prob_before_dropping = normalize_gate_prob_before_dropping
@@ -318,28 +316,18 @@ class Top2Gate(torch.nn.Module):
             from fairseq.modules import FairseqDropout
             self.eom_dropout_module = FairseqDropout(self.moe_expert_output_masking, module_name=self.__class__.__name__)
         self.use_moe_lang_perception = use_moe_lang_perception
-        if self.use_moe_lang_perception:
-            # language perception module
-            self.lpg = torch.nn.Linear(model_dim, num_experts)
-            # self.mix_gate = MixGate(model_dim)
-        
-        self.moe_lang_perception_ratio = moe_lang_perception_ratio
-        self.moe_lang_perception_warmup = moe_lang_perception_warmup
-        self.moe_lang_perception_outlier_threshold = moe_lang_perception_outlier_threshold
     def set_num_updates(self, num_updates):
         self.num_updates = num_updates
 
-    def forward(self, input: torch.Tensor=None, mask: Optional[torch.Tensor] = None, has_tutel=False, logits:torch.Tensor=None, lang_embeddings:torch.Tensor=None) -> Tuple[Tensor, Tensor, Tensor]:  # type: ignore
+    def forward(self, input: torch.Tensor=None, mask: Optional[torch.Tensor] = None, has_tutel=False, logits:torch.Tensor=None, lang_embeddings:torch.Tensor=None, sentence_embeddings:torch.Tensor=None) -> Tuple[Tensor, Tensor, Tensor]:  # type: ignore
         if logits is None:
-            logits = self.wg(input)
-
-        if self.use_moe_lang_perception and lang_embeddings is not None:
-            assert lang_embeddings.shape == input.shape
-            lp_logits = self.lpg(lang_embeddings) # (S, E)
-            #mix_ratio = self.mix_gate(lang_embeddings, input)
-        else:
-            lp_logits = None
-            #mix_ratio = None
+            if self.use_moe_lang_perception:
+                assert lang_embeddings is not None
+                assert sentence_embeddings is not None
+                input = torch.cat([input, lang_embeddings, sentence_embeddings], dim=1)
+                logits = self.wg(input)
+            else:
+                logits = self.wg(input)
 
         return top2gating(
             logits,
@@ -352,10 +340,5 @@ class Top2Gate(torch.nn.Module):
             capacity_factor=self.capacity_factor,
             batch_prioritized_routing=self.batch_prioritized_routing,
             has_tutel=has_tutel,
-            eom_dropout_module=self.eom_dropout_module,
-            lp_logits=lp_logits,
-            num_updates=self.num_updates if self.training else None,
-            moe_lang_perception_ratio=self.moe_lang_perception_ratio,
-            moe_lang_perception_warmup=self.moe_lang_perception_warmup,
-            moe_lang_perception_outlier_threshold=self.moe_lang_perception_outlier_threshold
-        )
+            eom_dropout_module=self.eom_dropout_module
+            )

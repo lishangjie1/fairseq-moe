@@ -37,10 +37,11 @@
                 "--update-freq" ,"1" ,
                 "--max-update", "250",
                 "--log-interval" ,"1",
-                "--save-dir", "/data/lsj/nfs/moe/moe_model3", "--save-interval-updates", "10",
+                "--save-dir", "/data/lsj/nfs/moe/moe_model3", "--save-interval-updates", "1000",
                 "--max-tokens", "2048",
                 "--record-a2a-perf-stats",
-                "--enable-lang-ids", "--use-decoder-moe-lang-perception"
+                "--tensorboard-logdir", "/data/lsj/moe/fairseq-moe/tensorboard_dir", "--no-save",
+                "--enable-lang-ids", "--use-moe-lang-perception"
             ]
             // "args":[
             //     "--nproc_per_node", "2", "--master_addr", "127.0.0.1", "--master_port", "12345",

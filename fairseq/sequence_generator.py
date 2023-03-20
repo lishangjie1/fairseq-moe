@@ -459,7 +459,8 @@ class SequenceGenerator(nn.Module):
                             model.decoder.forward(
                                 tokens[:, :1],
                                 incremental_state=incremental_states[i],
-                                self_attn_padding_mask=(tokens[:, :1]==0)
+                                self_attn_padding_mask=(tokens[:, :1]==0),
+                                tgt_lang_id=tgt_lang_id
                             )
                         max_num_remaining_sent=distributed_utils.all_reduce(num_remaining_sent_tensor.cuda(), op='max', group=None).item()
                         step+=1
