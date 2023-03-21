@@ -298,10 +298,19 @@ class TransformerEncoderLayer(nn.Module):
         else:
             # x - seq_len, batch_size, model_dim
             x = x.transpose(0, 1) # batch_size, seq_len, model_dim
+            sentence_embeddings = None
+            if self.moe_layer.gate.use_moe_lang_perception:
+                assert len(x.shape) == 3
+                sentence_padding_mask = torch.ones((x.shape[0], x.shape[1]), device=x.device, dtype=x.dtype)
+                if encoder_padding_mask is not None:
+                    sentence_padding_mask[encoder_padding_mask] = 0
+                sentence_embeddings = (x * sentence_padding_mask.unsqueeze(-1)).sum(dim=1) / torch.clamp(sentence_padding_mask.sum(dim=1).unsqueeze(-1), min=1e-9)
+                sentence_embeddings = sentence_embeddings.unsqueeze(1).expand(x.shape) # (bsz, seq, hidden)
+
             if getattr(self.args, "use_moe_pad_mask", False):
-                x, l_aux = self.moe_layer(x, input_padding_mask=encoder_padding_mask, lang_embeddings=lang_embeddings)
+                x, l_aux = self.moe_layer(x, input_padding_mask=encoder_padding_mask, lang_embeddings=lang_embeddings, sentence_embeddings=sentence_embeddings)
             else:
-                x, l_aux = self.moe_layer(x, lang_embeddings=lang_embeddings)
+                x, l_aux = self.moe_layer(x, lang_embeddings=lang_embeddings, sentence_embeddings=sentence_embeddings)
             x = x.transpose(0, 1) # seq_len, batch_size, model_dim
         x = self.residual_connection(x, residual)
         if not self.normalize_before:
@@ -605,10 +614,35 @@ class TransformerDecoderLayer(nn.Module):
         else:
             # x - seq_len, batch_size, model_dim
             x = x.transpose(0, 1) # batch_size, seq_len, model_dim
+            sentence_embeddings = None
+            if self.moe_layer.gate.use_moe_lang_perception:
+                if incremental_state is None: # training
+                    if self_attn_mask is not None:
+                        sentence_padding_mask = (self_attn_mask==0).unsqueeze(0).expand((x.shape[0], x.shape[1],x.shape[1]))
+                        sentence_padding_mask = sentence_padding_mask.type(x.dtype)
+                    else:
+                        sentence_padding_mask = torch.ones((x.shape[0], x.shape[1], x.shape[1]), device=x.device, dtype=x.dtype)
+                    sentence_embeddings = sentence_padding_mask.bmm(x) / sentence_padding_mask.sum(dim=-1, keepdim=True) # (bsz, seq, hidden_size)
+                    if self_attn_padding_mask is not None:
+                        sentence_embeddings[self_attn_padding_mask.bool()] = 0
+                else: # inference
+                    # load the previous hidden state from incremental_state
+                    prev_hidden_state = self.encoder_attn.get_incremental_state(incremental_state, "prev_hidden_state")
+                    if prev_hidden_state is None: # the first step in decoding
+                        sentence_embeddings = x # (bsz, 1, hidden_size)
+                        self.encoder_attn.set_incremental_state(incremental_state, "prev_hidden_state", x)
+                    else:
+                        all_hidden_state = torch.cat([prev_hidden_state, x], dim=1) # (bsz, seq, hidden_size)
+                        sentence_embeddings = all_hidden_state.mean(dim=1, keepdim=True) # (bsz, 1, hidden_size)
+                        self.encoder_attn.set_incremental_state(incremental_state, "prev_hidden_state", all_hidden_state)
+
+                
+                
+                
             if getattr(self.args, "use_moe_pad_mask", False):
-                x, l_aux = self.moe_layer(x, input_padding_mask=self_attn_padding_mask, lang_embeddings=lang_embeddings)
+                x, l_aux = self.moe_layer(x, input_padding_mask=self_attn_padding_mask, lang_embeddings=lang_embeddings, sentence_embeddings=sentence_embeddings)
             else:
-                x, l_aux = self.moe_layer(x, lang_embeddings=lang_embeddings)
+                x, l_aux = self.moe_layer(x, lang_embeddings=lang_embeddings, sentence_embeddings=sentence_embeddings)
             x = x.transpose(0, 1) # seq_len, batch_size, model_dim
         x = self.residual_connection(x, residual)
         if not self.normalize_before:

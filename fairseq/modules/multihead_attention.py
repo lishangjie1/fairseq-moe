@@ -450,6 +450,12 @@ class MultiheadAttention(nn.Module):
                         break
                     input_buffer[k] = input_buffer_k.index_select(0, new_order)
             incremental_state = self._set_input_buffer(incremental_state, input_buffer)
+        
+        prev_hidden_state_buffer = self.get_incremental_state(incremental_state, "prev_hidden_state")
+        if prev_hidden_state_buffer is not None:
+            prev_hidden_state_buffer = prev_hidden_state_buffer.index_select(0, new_order)
+            incremental_state = self.set_incremental_state(incremental_state, "prev_hidden_state", prev_hidden_state_buffer)
+        
         return incremental_state
 
     def _get_input_buffer(
