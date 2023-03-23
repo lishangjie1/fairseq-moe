@@ -641,8 +641,8 @@ class TransformerEncoder(FairseqEncoder):
         x, encoder_embedding = self.forward_embedding(src_tokens, token_embeddings)
         src_lang_embeddings = self.forward_embedding(src_lang_id.unsqueeze(1))[1] if src_lang_id is not None else None
         # record lang id
-        share_mem('is_encoder', True)
-        share_mem('lang_id', self.dictionary.symbols[src_lang_id[0]])
+        # share_mem('is_encoder', True)
+        # share_mem('lang_id', self.dictionary.symbols[src_lang_id[0]])
         # account for padding while computing the representation
         if has_pads:
             x = x * (1 - encoder_padding_mask.unsqueeze(-1).type_as(x))
@@ -1127,8 +1127,8 @@ class TransformerDecoder(FairseqIncrementalDecoder):
         # embed tokens and positions
         x, _ = self.forward_embedding(prev_output_tokens, token_embeddings, incremental_state)
         tgt_lang_embeddings = self.forward_embedding(tgt_lang_id.unsqueeze(1))[1] if tgt_lang_id is not None else None
-        share_mem('is_encoder', False)
-        share_mem('lang_id', self.dictionary.symbols[tgt_lang_id[0]])
+        # share_mem('is_encoder', False)
+        # share_mem('lang_id', self.dictionary.symbols[tgt_lang_id[0]])
         # B x T x C -> T x B x C
         x = x.transpose(0, 1)
 

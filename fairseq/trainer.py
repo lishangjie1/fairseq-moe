@@ -356,8 +356,8 @@ class Trainer(object):
         return getattr(self.cfg.model, "base_layers", 0) > 0
     @property
     def use_sharded_state(self):
-        return True
-        #return self.cfg.distributed_training.use_sharded_state
+        #return True
+        return self.cfg.distributed_training.use_sharded_state
 
     def consolidate_optimizer(self):
         """For OSS, we need to consolidate the state dict."""

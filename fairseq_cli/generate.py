@@ -134,6 +134,7 @@ def _main(cfg: DictConfig, output_file):
 
     # Load ensemble
     logger.info("loading model(s) from {}".format(cfg.common_eval.path))
+    moe_freq = 0
     if torch.distributed.is_initialized() and torch.distributed.get_world_size() > 1:
         cfg.checkpoint.checkpoint_suffix=""
         if cfg.common_eval.is_moe:
@@ -256,7 +257,8 @@ def _main(cfg: DictConfig, output_file):
                         [1,2]).long().cuda(),
                     "src_lengths": torch.tensor([2, ]).cuda(),
                     "src_lang_id": torch.tensor([0]).cuda(),
-                    "tgt_lang_id": torch.tensor([0]).cuda()},
+                    "tgt_lang_id": torch.tensor([0]).cuda()
+                },
                 "target": None,
             }
             sample=dummy_sample
@@ -506,7 +508,8 @@ class MoELogger():
                 if isinstance(module, MOELayer):
                     total_val += module.metadata[key] if key in module.metadata else 0
                     count += 1
-            self.moe_logging_output[key] = (self.moe_logging_output.get(key, 0)*self.log_count + total_val / count)/(self.log_count+1)
+            mean_val = total_val / count if count > 0 else 0
+            self.moe_logging_output[key] = (self.moe_logging_output.get(key, 0)*self.log_count + mean_val)/(self.log_count+1)
         self.log_count+=1
 
     def print(self,):

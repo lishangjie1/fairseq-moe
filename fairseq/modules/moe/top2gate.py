@@ -295,9 +295,6 @@ class Top2Gate(torch.nn.Module):
         capacity_factor=1.0,
         moe_expert_output_masking=0.0,
         use_moe_lang_perception=False,
-        moe_lang_perception_ratio=0.25,
-        moe_lang_perception_warmup=None,
-        moe_lang_perception_outlier_threshold=0.01
     ) -> None:
         super().__init__()
         if use_moe_lang_perception:
