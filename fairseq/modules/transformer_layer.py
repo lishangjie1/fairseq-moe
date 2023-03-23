@@ -105,6 +105,62 @@ class FeedForwardNetwork(nn.Module):
         return x
 
 
+class CMR_Gate(nn.Module):
+    """
+        Feed Forward Network layer in the Transformer model
+    """
+    def __init__(self, args, input_dim, ffn_dim, output_dim, dropout_module=None):
+        super().__init__()
+        self.input_dim = input_dim
+        self.output_dim = output_dim
+        self.quant_noise = getattr(args, "quant_noise_pq", 0)
+        self.quant_noise_block_size = getattr(args, "quant_noise_pq_block_size", 8)
+        self.activation_fn = utils.get_activation_fn(
+            activation=str(args.activation_fn)
+            if getattr(args, "activation_fn", None) is not None
+            else "relu"
+        )
+        activation_dropout_p = getattr(args, "activation_dropout", 0) or 0
+        if activation_dropout_p == 0:
+            # for backwards compatibility with models that use args.relu_dropout
+            activation_dropout_p = getattr(args, "relu_dropout", 0) or 0
+        self.activation_dropout_module = FairseqDropout(
+            float(activation_dropout_p), module_name=self.__class__.__name__
+        )
+        self.fc1 = self.build_fc1(
+            self.input_dim,
+            ffn_dim,
+            self.quant_noise,
+            self.quant_noise_block_size,
+        )
+        self.fc2 = self.build_fc2(
+            ffn_dim,
+            self.output_dim,
+            self.quant_noise,
+            self.quant_noise_block_size,
+        )
+        self.dropout_module = FairseqDropout(
+                args.dropout, module_name=self.__class__.__name__
+            ) if not dropout_module else dropout_module
+
+    def build_fc1(self, input_dim, output_dim, q_noise, qn_block_size):
+        return quant_noise(
+            nn.Linear(input_dim, output_dim), p=q_noise, block_size=qn_block_size
+        )
+
+    def build_fc2(self, input_dim, output_dim, q_noise, qn_block_size):
+        return quant_noise(
+            nn.Linear(input_dim, output_dim), p=q_noise, block_size=qn_block_size
+        )
+
+    def forward(self, x):
+        x = self.fc1(x)
+        x = self.activation_fn(x)
+        x = self.activation_dropout_module(x)
+        x = self.fc2(x)
+        x = self.dropout_module(x)
+        return x
+    
 class TransformerEncoderLayer(nn.Module):
     """Encoder layer block.
 
@@ -169,14 +225,14 @@ class TransformerEncoderLayer(nn.Module):
             self.is_use_moe_cmr = args.use_moe_cmr
 
             if args.use_moe_cmr:
-                self.cmr_gate = nn.Linear(self.embed_dim, 2) # share or moe
-                nn.init.normal_(self.cmr_gate.weight, mean=0, std=1)
-                nn.init.zeros_(self.cmr_gate.bias)
+                self.cmr_gate = self.build_cmr_gate(args, self.embed_dim, self.dropout_module) # share or moe
                 self.max_temp, self.min_temp, self.temp_decay = [float(x) for x in args.moe_cmr_temp.split(",")]
                 self.share_expert = self.build_cmr(
                         args, self.embed_dim, ffn_dim, self.dropout_module
                     )
         self.final_layer_norm = LayerNorm(self.embed_dim)
+    def build_cmr_gate(self, args, embed_dim, dropout_module):
+        return CMR_Gate(args, embed_dim, embed_dim // 4, 2, dropout_module)
 
     def build_cmr(self, args, embed_dim, expert_ffn_dim, dropout_module):
         return FeedForwardNetwork(args, embed_dim, expert_ffn_dim, dropout_module)
@@ -204,9 +260,6 @@ class TransformerEncoderLayer(nn.Module):
                 getattr(args, "capacity_factor", 1.0),
                 moe_expert_output_masking=getattr(args, "moe_expert_output_masking", 0.0),
                 use_moe_lang_perception=getattr(args, "use_moe_lang_perception", False) or getattr(args, "use_encoder_moe_lang_perception", False),
-                moe_lang_perception_ratio=getattr(args, "moe_lang_perception_ratio", 0.25),
-                moe_lang_perception_warmup=getattr(args, "moe_lang_perception_warmup", 40000),
-                moe_lang_perception_outlier_threshold=getattr(args, "moe_lang_perception_outlier_threshold", 0.01),
             )
         return gate
 
@@ -469,9 +522,7 @@ class TransformerDecoderLayer(nn.Module):
             self.moe_layer = self.build_moe_layer(gate, experts, args)
             self.is_use_moe_cmr = args.use_moe_cmr
             if args.use_moe_cmr:
-                self.cmr_gate = nn.Linear(self.embed_dim, 2) # share or moe
-                nn.init.normal_(self.cmr_gate.weight, mean=0, std=1)
-                nn.init.zeros_(self.cmr_gate.bias)
+                self.cmr_gate = self.build_cmr_gate(args, self.embed_dim, self.dropout_module) # share or moe
                 self.max_temp, self.min_temp, self.temp_decay = [float(x) for x in args.moe_cmr_temp.split(",")]
                 self.share_expert = self.build_cmr(
                         args, self.embed_dim, ffn_dim, self.dropout_module
@@ -484,7 +535,8 @@ class TransformerDecoderLayer(nn.Module):
         self.onnx_trace = False
 
         self.args = args
-
+    def build_cmr_gate(self, args, embed_dim, dropout_module):
+        return CMR_Gate(args, embed_dim, embed_dim // 4, 2, dropout_module)
     def build_cmr(self, args, embed_dim, expert_ffn_dim, dropout_module):
         return FeedForwardNetwork(args, embed_dim, expert_ffn_dim, dropout_module)
     def build_gate(self, args):
@@ -511,9 +563,6 @@ class TransformerDecoderLayer(nn.Module):
                 getattr(args, "capacity_factor", 1.0),
                 moe_expert_output_masking=getattr(args, "moe_expert_output_masking", 0.0),
                 use_moe_lang_perception=getattr(args, "use_moe_lang_perception", False) or getattr(args, "use_decoder_moe_lang_perception", False),
-                moe_lang_perception_ratio=getattr(args, "moe_lang_perception_ratio", 0.25),
-                moe_lang_perception_warmup=getattr(args, "moe_lang_perception_warmup", 40000),
-                moe_lang_perception_outlier_threshold=getattr(args, "moe_lang_perception_outlier_threshold", 0.01),
             )
         return gate
 

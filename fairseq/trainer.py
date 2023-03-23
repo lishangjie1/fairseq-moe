@@ -495,12 +495,17 @@ class Trainer(object):
         other ranks.
         """
         extra_state, self._optim_history, last_optim_state = None, [], None
-
-
         is_distributed = self.data_parallel_world_size > 1
         bexists = PathManager.isfile(filename)
-        if bexists:
-            logger.info(f"Preparing to load checkpoint {filename}")
+        bexists_share = False
+        if self.is_moe:
+            share_filename = re.sub('rank-[0-9]+', 'shared', filename)
+            bexists_share = PathManager.isfile(share_filename) # only load share parameters
+        if bexists or bexists_share:
+            if bexists:
+                logger.info(f"Preparing to load checkpoint {filename}")
+            else:
+                logger.info(f"Preparing to load checkpoint {share_filename}")
             load_on_all_ranks = (
                 self.cfg.checkpoint.load_checkpoint_on_all_dp_ranks
                 # TPUs don't support broadcast yet, so load checkpoints
