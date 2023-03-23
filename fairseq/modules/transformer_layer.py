@@ -5,7 +5,7 @@
 
 from fairseq.distributed.utils import get_global_rank
 from typing import Dict, List, Optional
-
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -166,8 +166,20 @@ class TransformerEncoderLayer(nn.Module):
             gate=self.build_gate(args)
             experts = self.make_experts(args, self.embed_dim, ffn_dim, self.dropout_module)
             self.moe_layer = self.build_moe_layer(gate, experts, args)
+            self.is_use_moe_cmr = args.use_moe_cmr
+
+            if args.use_moe_cmr:
+                self.cmr_gate = nn.Linear(self.embed_dim, 2) # share or moe
+                nn.init.normal_(self.cmr_gate.weight, mean=0, std=1)
+                nn.init.zeros_(self.cmr_gate.bias)
+                self.max_temp, self.min_temp, self.temp_decay = [float(x) for x in args.moe_cmr_temp.split(",")]
+                self.share_expert = self.build_cmr(
+                        args, self.embed_dim, ffn_dim, self.dropout_module
+                    )
         self.final_layer_norm = LayerNorm(self.embed_dim)
 
+    def build_cmr(self, args, embed_dim, expert_ffn_dim, dropout_module):
+        return FeedForwardNetwork(args, embed_dim, expert_ffn_dim, dropout_module)
     def build_gate(self, args):
         if args.moe_top1_expert:
             gate = Top1Gate(
@@ -240,7 +252,11 @@ class TransformerEncoderLayer(nn.Module):
                 if k in state_dict:
                     state_dict["{}.{}.{}".format(name, new, m)] = state_dict[k]
                     del state_dict[k]
-
+    def set_num_updates(self, num_updates):
+        if self.is_moe_layer and self.is_use_moe_cmr:
+            self.curr_temp = max(
+                self.max_temp * self.temp_decay ** num_updates, self.min_temp
+            )
     def forward(self, 
                 x, 
                 encoder_padding_mask: Optional[Tensor],
@@ -307,10 +323,55 @@ class TransformerEncoderLayer(nn.Module):
                 sentence_embeddings = (x * sentence_padding_mask.unsqueeze(-1)).sum(dim=1) / torch.clamp(sentence_padding_mask.sum(dim=1).unsqueeze(-1), min=1e-9)
                 sentence_embeddings = sentence_embeddings.unsqueeze(1).expand(x.shape) # (bsz, seq, hidden)
 
-            if getattr(self.args, "use_moe_pad_mask", False):
-                x, l_aux = self.moe_layer(x, input_padding_mask=encoder_padding_mask, lang_embeddings=lang_embeddings, sentence_embeddings=sentence_embeddings)
+            x_shape = x.shape
+            # drop pad token
+            if encoder_padding_mask is not None:
+                x = x[~encoder_padding_mask.bool()] # drop pad token
             else:
-                x, l_aux = self.moe_layer(x, lang_embeddings=lang_embeddings, sentence_embeddings=sentence_embeddings)
+                # reshape x into (bsz*seq, dmodel)
+                x = x.reshape(-1, x.shape[-1])
+            # cmr
+            if self.is_use_moe_cmr:
+                cmr_logits = self.cmr_gate(x) # bsz*seq, 2
+                if self.training:
+                    hard_cmr = F.gumbel_softmax(cmr_logits.float(), tau=self.curr_temp, hard=True).type_as(x)
+                    hard_cmr = hard_cmr.argmax(dim=1).bool()
+                    if hard_cmr.all():
+                        # Need one token routing to moe at least for fsdp training
+                        # In consequence, random routing a token to moe
+                        hard_cmr[np.random.randint(0, len(hard_cmr))] = 0
+                else:
+                    hard_cmr = cmr_logits.argmax(dim=1).bool() # 1 for share, 0 for moe
+                x_share = self.share_expert(x[hard_cmr])
+                x_moe = x[~hard_cmr]
+                if len(x_moe) == 0:
+                    # dummy token for moe in inference
+                    x_moe = torch.zeros((1, x.shape[1]), device=x.device, dtype=x.dtype)
+                    x_moe, l_aux = self.moe_layer(x_moe, lang_embeddings=lang_embeddings, sentence_embeddings=sentence_embeddings)
+                    x_moe, l_aux = None, 0.0
+                else:
+                    x_moe, l_aux = self.moe_layer(x_moe, lang_embeddings=lang_embeddings, sentence_embeddings=sentence_embeddings)
+            else:
+                x_share = None
+                x_moe = x
+                x_moe, l_aux = self.moe_layer(x_moe, lang_embeddings=lang_embeddings, sentence_embeddings=sentence_embeddings)
+            
+            # back into x
+            if x_share is not None:
+                x[hard_cmr] = x_share
+                if x_moe is not None:
+                    x[~hard_cmr] = x_moe
+            else:
+                x = x_moe
+
+            if encoder_padding_mask is not None:
+                new_x = torch.zeros(x_shape, device=x.device, dtype=x.dtype)
+                new_x[~encoder_padding_mask.bool()] = x
+                x = new_x
+            else:
+                x = x.reshape(x_shape)
+            
+            
             x = x.transpose(0, 1) # seq_len, batch_size, model_dim
         x = self.residual_connection(x, residual)
         if not self.normalize_before:
@@ -406,6 +467,15 @@ class TransformerDecoderLayer(nn.Module):
             gate=self.build_gate(args)
             experts = self.make_experts(args, self.embed_dim, ffn_dim, self.dropout_module)
             self.moe_layer = self.build_moe_layer(gate, experts, args)
+            self.is_use_moe_cmr = args.use_moe_cmr
+            if args.use_moe_cmr:
+                self.cmr_gate = nn.Linear(self.embed_dim, 2) # share or moe
+                nn.init.normal_(self.cmr_gate.weight, mean=0, std=1)
+                nn.init.zeros_(self.cmr_gate.bias)
+                self.max_temp, self.min_temp, self.temp_decay = [float(x) for x in args.moe_cmr_temp.split(",")]
+                self.share_expert = self.build_cmr(
+                        args, self.embed_dim, ffn_dim, self.dropout_module
+                    )
 
 
         self.final_layer_norm = LayerNorm(self.embed_dim, export=export)
@@ -415,6 +485,8 @@ class TransformerDecoderLayer(nn.Module):
 
         self.args = args
 
+    def build_cmr(self, args, embed_dim, expert_ffn_dim, dropout_module):
+        return FeedForwardNetwork(args, embed_dim, expert_ffn_dim, dropout_module)
     def build_gate(self, args):
         if args.moe_top1_expert:
             gate = Top1Gate(
@@ -486,6 +558,11 @@ class TransformerDecoderLayer(nn.Module):
     def residual_connection(self, x, residual):
         return residual + x
 
+    def set_num_updates(self, num_updates):
+        if self.is_moe_layer and self.is_use_moe_cmr:
+            self.curr_temp = max(
+                self.max_temp * self.temp_decay ** num_updates, self.min_temp
+            )
     def forward(
         self,
         x,
@@ -635,14 +712,56 @@ class TransformerDecoderLayer(nn.Module):
                         all_hidden_state = torch.cat([prev_hidden_state, x], dim=1) # (bsz, seq, hidden_size)
                         sentence_embeddings = all_hidden_state.mean(dim=1, keepdim=True) # (bsz, 1, hidden_size)
                         self.encoder_attn.set_incremental_state(incremental_state, "prev_hidden_state", all_hidden_state)
-
-                
-                
-                
-            if getattr(self.args, "use_moe_pad_mask", False):
-                x, l_aux = self.moe_layer(x, input_padding_mask=self_attn_padding_mask, lang_embeddings=lang_embeddings, sentence_embeddings=sentence_embeddings)
+            
+            x_shape = x.shape
+            # drop pad token
+            if self.training and self_attn_padding_mask is not None:
+                x = x[~self_attn_padding_mask.bool()] # drop pad token in training
             else:
-                x, l_aux = self.moe_layer(x, lang_embeddings=lang_embeddings, sentence_embeddings=sentence_embeddings)
+                # reshape x into (bsz*seq, dmodel)
+                x = x.reshape(-1, x.shape[-1])
+            # cmr
+            if self.is_use_moe_cmr:
+                cmr_logits = self.cmr_gate(x) # bsz*seq, 2
+                if self.training:
+                    hard_cmr = F.gumbel_softmax(cmr_logits.float(), tau=self.curr_temp, hard=True).type_as(x)
+                    hard_cmr = hard_cmr.argmax(dim=1).bool()
+                    if hard_cmr.all():
+                        # Need one token routing to moe at least for fsdp training
+                        # In consequence, random routing a token to moe
+                        hard_cmr[np.random.randint(0, len(hard_cmr))] = 0
+                else:
+                    hard_cmr = cmr_logits.argmax(dim=1).bool() # 1 for share, 0 for moe
+                
+                x_share = self.share_expert(x[hard_cmr])
+                x_moe = x[~hard_cmr]
+                if len(x_moe) == 0:
+                    # dummy token for moe in inference
+                    x_moe = torch.zeros((1, x.shape[1]), device=x.device, dtype=x.dtype)
+                    x_moe, l_aux = self.moe_layer(x_moe, lang_embeddings=lang_embeddings, sentence_embeddings=sentence_embeddings)
+                    x_moe, l_aux = None, 0.0
+                else:
+                    x_moe, l_aux = self.moe_layer(x_moe, lang_embeddings=lang_embeddings, sentence_embeddings=sentence_embeddings)
+            else:
+                x_share = None
+                x_moe = x
+                x_moe, l_aux = self.moe_layer(x_moe, lang_embeddings=lang_embeddings, sentence_embeddings=sentence_embeddings)
+
+            # back into x
+            if x_share is not None:
+                x[hard_cmr] = x_share
+                if x_moe is not None:
+                    x[~hard_cmr] = x_moe
+            else:
+                x = x_moe
+
+            if self.training and self_attn_padding_mask is not None:
+                new_x = torch.zeros(x_shape, device=x.device, dtype=x.dtype)
+                new_x[~self_attn_padding_mask.bool()] = x
+                x = new_x
+            else:
+                x = x.reshape(x_shape)
+            
             x = x.transpose(0, 1) # seq_len, batch_size, model_dim
         x = self.residual_connection(x, residual)
         if not self.normalize_before:

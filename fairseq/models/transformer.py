@@ -269,12 +269,10 @@ class TransformerModel(FairseqEncoderDecoderModel):
                             help='if true use a language perception module to partially mask moe expert')
         parser.add_argument('--use-decoder-moe-lang-perception', default=False, action='store_true',
                             help='if true use a language perception module to partially mask moe expert')
-        parser.add_argument('--moe-lang-perception-ratio', type=float, default=0.25,
-                            help="ratio of language perception mask")
-        parser.add_argument('--moe-lang-perception-warmup', type=int, default=40000,
-                            help="warm up for language perception")
-        parser.add_argument('--moe-lang-perception-outlier-threshold', type=float, default=0.01,
-                            help="Expert will be masked if its weight in language perception is smaller than threshold")
+        parser.add_argument('--use-moe-cmr', default=False, action='store_true',
+                            help='if true use a share ffn in moe_layer')
+        parser.add_argument('--moe-cmr-temp', type=str, default="2,0.1,0.99995",
+                            help='cmr temperature for gumbel softmax')
         parser.add_argument('--capacity-factor', type=float, default=1.0,
                             help="Fraction of tokens as capacity during training")
         parser.add_argument('--moe-normalize-expert-grad', type=str, default='world_size',

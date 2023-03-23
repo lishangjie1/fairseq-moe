@@ -41,7 +41,7 @@
             //     "--max-tokens", "2048",
             //     "--record-a2a-perf-stats",
             //     "--tensorboard-logdir", "/data/lsj/moe/fairseq-moe/tensorboard_dir",
-            //     "--enable-lang-ids", "--use-moe-lang-perception"
+            //     "--enable-lang-ids", "--use-moe-cmr", "--find-unused-parameters"
             // ]
             "args":[
                 "--nproc_per_node", "2", "--master_addr", "127.0.0.1", "--master_port", "12345",

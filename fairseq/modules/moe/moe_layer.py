@@ -113,16 +113,16 @@ class MOELayer(Base):
     def forward(self, *input: Tensor, input_padding_mask=None, **kwargs: Any) -> Tensor:
         assert len(input) == 1, "only single input Tensor supported"
         input = input[0]
-        assert len(input.shape) == 3, "input Tensor must have dimensions: bsz, seq, dmodel"
-        if input_padding_mask is not None:
-            assert len(input_padding_mask.shape) == 2, "input Tensor must have dimensions: bsz,seq"
-            assert input_padding_mask.shape[0]==input.shape[0]
-            if input_padding_mask.shape[1] != input.shape[1]:
-                input_padding_mask=None
-        # a sert input.shape[0] % len(self.experts) == 0, "num tokens must be order of number of local experts"
+        assert len(input.shape) == 2, "input Tensor must have dimensions: bsz*seq, dmodel"
+        # if input_padding_mask is not None:
+        #     assert len(input_padding_mask.shape) == 2, "input Tensor must have dimensions: bsz,seq"
+        #     assert input_padding_mask.shape[0]==input.shape[0]
+        #     if input_padding_mask.shape[1] != input.shape[1]:
+        #         input_padding_mask=None
+        # assert input.shape[0] % len(self.experts) == 0, "num tokens must be order of number of local experts"
 
         # Implement Algorithm 2 from GShard paper.
-        d_model = input.shape[2]
+        d_model = input.shape[1]
         # Pad to expected batch size
         input_shape = list(input.shape)
         expected_bsz = getattr(self.args, 'batch_size', 0) if self.training else getattr(self.args, 'batch_size_valid', 0)
@@ -130,44 +130,11 @@ class MOELayer(Base):
         if expected_bsz is None:
             expected_bsz = 0
         expected_bsz=int(expected_bsz)
-        # Note: Padding is not necessary at generation time at present
-        # because all DDP workers process the same batch. Also, batch size at generation time
-        # can be different from that present in the checkpoint state
-        if not self.in_generation and expected_bsz != 0 and input_shape[0] != expected_bsz:
-            logger.warning(f"padding batch with unexpected size {input_shape[0]} (expected: {expected_bsz})")
-            assert input_shape[0] < expected_bsz, f"{input_shape[0]} < {expected_bsz}"
-            padded_input = torch.zeros(
-                (expected_bsz, input_shape[1], input_shape[2]),
-                dtype=input.dtype, layout=input.layout, device=input.device)
-            padded_input[:input_shape[0], :, :] = input
-            input = padded_input
-
-            padded_input_padding_mask = torch.ones(
-                (expected_bsz, input_shape[1], ), dtype=torch.bool, device=input.device
-            )
-            if input_padding_mask is not None:
-                padded_input_padding_mask[:input_shape[0], :] = input_padding_mask
-            else:
-                padded_input_padding_mask[:input_shape[0], :] = False
-            input_padding_mask = padded_input_padding_mask
-
-        # sentence_embeddings = None
-        # if self.gate.use_moe_lang_perception:
-        #     # sentence embeddings
-        #     if kwargs.get("attn_mask", None) is not None: # auto-regress mask
-        #         sentence_padding_mask = (kwargs["attn_mask"]==0).unsqueeze(0).expand((input.shape[0], input.shape[1],input.shape[1]))
-        #         sentence_padding_mask = sentence_padding_mask.type(input.dtype)
-        #     else:
-        #         sentence_padding_mask = torch.ones((input.shape[0], input.shape[1], input.shape[1]), device=input.device, dtype=input.dtype)
-            
-        #     sentence_embeddings = sentence_padding_mask.bmm(input) / sentence_padding_mask.sum(dim=-1, keepdim=True)
-        #     if input_padding_mask is not None:
-        #         sentence_embeddings[input_padding_mask.bool()] = 0
-
+        
         # Reshape into S tokens by dropping sequence dimension.
-        reshaped_input = input.reshape(-1, d_model)
+        reshaped_input = input #.reshape(-1, d_model)
         reshaped_input_shape = reshaped_input.shape
-        reshaped_input_padding_mask = input_padding_mask.reshape(-1) if input_padding_mask is not None else None
+        #reshaped_input_padding_mask = input_padding_mask.reshape(-1) if input_padding_mask is not None else None
 
         # Doing padding here when --max-tokens is specified and not --batch-size or --max-sentences
         # Pro of --max-tokens: more flexible for MT variable sequence lengths
@@ -187,10 +154,10 @@ class MOELayer(Base):
             padded_input_padding_mask = torch.ones(
                 (expected_dim,), dtype=torch.bool, device=padded_input.device
             )
-            if reshaped_input_padding_mask is not None:
-                padded_input_padding_mask[:reshaped_input_shape[0]] = reshaped_input_padding_mask
-            else:
-                padded_input_padding_mask[:reshaped_input_shape[0]] = False
+            # if reshaped_input_padding_mask is not None:
+            #     padded_input_padding_mask[:reshaped_input_shape[0]] = reshaped_input_padding_mask
+            # else:
+            padded_input_padding_mask[:reshaped_input_shape[0]] = False
             reshaped_input_padding_mask = padded_input_padding_mask
 
 
@@ -259,9 +226,9 @@ class MOELayer(Base):
             combined_output = combine_weights.view(S, E*C).mm(expert_output.view(E*C, M))
         
         # Remove padding here when --max-tokens is specified and not --batch-size or --max-sentences
-        combined_output = combined_output[:reshaped_input_shape[0], :]
-        combined_output = combined_output.reshape(input.shape) 
-        combined_output = combined_output[:input_shape[0], :, :]
+        combined_output = combined_output[:reshaped_input_shape[0], :] # (bsz*seq, dmodel)
+        # combined_output = combined_output.reshape(input.shape) 
+        # combined_output = combined_output[:input_shape[0], :, :]
 
         self.record_all_to_all_stats()
         # self.record_expert_choices(dispatch_mask[:, :, :reshaped_input_shape[0]]) # dispatch_mask: ecs

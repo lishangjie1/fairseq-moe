@@ -255,7 +255,8 @@ def _main(cfg: DictConfig, output_file):
                     "src_tokens": torch.zeros(
                         [1,2]).long().cuda(),
                     "src_lengths": torch.tensor([2, ]).cuda(),
-                },
+                    "src_lang_id": torch.tensor([0]).cuda(),
+                    "tgt_lang_id": torch.tensor([0]).cuda()},
                 "target": None,
             }
             sample=dummy_sample
