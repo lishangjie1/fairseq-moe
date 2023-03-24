@@ -319,9 +319,15 @@ def load_checkpoint_to_cpu(path, arg_overrides=None, load_on_all_ranks=False, is
     # path to checkpoint...-shared.pt
     shared_path = re.sub('rank-[0-9]+', 'shared', local_path)
     if is_moe and os.path.exists(shared_path):
-        expert_state = moe_checkpoint_utils.load_expert_state(local_path)  # Possibly merge experts
+        expert_state = None
+        # allow to only load share model
+        if PathManager.isfile(local_path):
+            expert_state = moe_checkpoint_utils.load_expert_state(local_path)  # Possibly merge experts
         shared_state = torch_load_cpu(shared_path)
-        state = moe_checkpoint_utils.merge_expert_and_shared_state(expert_state, shared_state)
+        if expert_state is not None:
+            state = moe_checkpoint_utils.merge_expert_and_shared_state(expert_state, shared_state)
+        else:
+            state = shared_state
     else:
         state = torch_load_cpu(local_path)
 

@@ -527,8 +527,10 @@ class Trainer(object):
                     master_path = re.sub("shard[0-9]+", "shard0", filename)
                     last_optim_state = torch.load(master_path, map_location='cpu')['last_optimizer_state']
 
-                logger.info(f"Loaded state for {filename}")
-
+                if bexists:
+                    logger.info(f"Loaded state for {filename}")
+                else:
+                    logger.info(f"Loaded state for {share_filename}")
                 # If doing zero_sharding, do not broadcast global optimizer
                 # state. Later we will broadcast sharded states to each rank
                 # to avoid memory exploding.
@@ -563,6 +565,36 @@ class Trainer(object):
             # load model parameters
             logger.info('prepare to feed parameters to model')
             try:
+                if not bexists and bexists_share:
+                    # only load share model part, needs to change state['model']
+                    model_state_dict = self.model.state_dict()
+                    model_specific_keys = []
+                    state_specific_keys = []
+                    for key in model_state_dict:
+                        if key not in state["model"]:
+                            model_specific_keys.append(key)
+                    for key in state["model"]:
+                        if key not in model_state_dict:
+                            state_specific_keys.append(key)
+                    # regard ffn as share expert
+                    new_state_specific_keys = []
+                    for key in state_specific_keys:
+                        # share expert
+                        if "fc1" in key:
+                            new_key = re.sub("fc1", "share_expert.fc1", key)
+                        elif "fc2" in key:
+                            new_key = re.sub("fc2", "share_expert.fc2", key)
+                        if new_key in model_specific_keys:
+                            state["model"][new_key] = state["model"][key]
+                            del state["model"][key]
+                            model_specific_keys.remove(new_key)
+                        else:
+                            new_state_specific_keys.append(key)
+                    assert len(new_state_specific_keys) == 0 
+                    # add random initialized expert parameters
+                    for key in model_specific_keys:
+                        state["model"][key] = model_state_dict[key]
+
                 self.model.load_state_dict(
                     state["model"], strict=True, model_cfg=self.cfg.model
                 )

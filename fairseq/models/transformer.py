@@ -558,7 +558,7 @@ class TransformerEncoder(FairseqEncoder):
             )
         else:
             return self.forward_non_torchscript(net_input)
-        
+    
     def forward(
         self,
         src_tokens,
