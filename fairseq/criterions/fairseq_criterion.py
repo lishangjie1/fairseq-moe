@@ -153,6 +153,7 @@ class MoECriterionConfig(FairseqDataclass):
 class MoECriterion(FairseqCriterion):
 
     moe_logging_keys = [
+        "cmr_share_rate",
         "overflow_expert1",        # average % of overflowed tokens from 1st expert
         "overflow_expert2",        # average % of overflowed tokens from 2nd expert
         "entropy_gating",          # average entropy of the gating distribution

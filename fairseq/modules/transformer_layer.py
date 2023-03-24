@@ -385,6 +385,9 @@ class TransformerEncoderLayer(nn.Module):
                 x = x.reshape(-1, x.shape[-1])
             # cmr
             if self.is_use_moe_cmr:
+                def record_cmr(routing, metadata):
+                    metadata['cmr_share_rate'] = routing.sum() / len(routing)
+
                 cmr_logits = self.cmr_gate(x) # bsz*seq, 2
                 if self.training:
                     hard_cmr = F.gumbel_softmax(cmr_logits.float(), tau=self.curr_temp, hard=True).type_as(x)
@@ -424,6 +427,8 @@ class TransformerEncoderLayer(nn.Module):
             else:
                 x = x.reshape(x_shape)
             
+            if self.is_use_moe_cmr:
+                record_cmr(hard_cmr, self.moe_layer.metadata)
             
             x = x.transpose(0, 1) # seq_len, batch_size, model_dim
         x = self.residual_connection(x, residual)
@@ -771,6 +776,9 @@ class TransformerDecoderLayer(nn.Module):
                 x = x.reshape(-1, x.shape[-1])
             # cmr
             if self.is_use_moe_cmr:
+                def record_cmr(routing, metadata):
+                    metadata['cmr_share_rate'] = routing.sum() / len(routing)
+
                 cmr_logits = self.cmr_gate(x) # bsz*seq, 2
                 if self.training:
                     hard_cmr = F.gumbel_softmax(cmr_logits.float(), tau=self.curr_temp, hard=True).type_as(x)
@@ -781,7 +789,6 @@ class TransformerDecoderLayer(nn.Module):
                         hard_cmr[np.random.randint(0, len(hard_cmr))] = 0
                 else:
                     hard_cmr = cmr_logits.argmax(dim=1).bool() # 1 for share, 0 for moe
-                
                 x_share = self.share_expert(x[hard_cmr])
                 x_moe = x[~hard_cmr]
                 if len(x_moe) == 0:
@@ -810,6 +817,10 @@ class TransformerDecoderLayer(nn.Module):
                 x = new_x
             else:
                 x = x.reshape(x_shape)
+
+            # record cmr routing rate
+            if self.is_use_moe_cmr:
+                record_cmr(hard_cmr, self.moe_layer.metadata)
             
             x = x.transpose(0, 1) # seq_len, batch_size, model_dim
         x = self.residual_connection(x, residual)
