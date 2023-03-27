@@ -208,7 +208,7 @@ class MoECriterion(FairseqCriterion):
         loss, inner_loss, moe_loss, cmr_loss, moe_metadata, sample_size, logging_output = self.compute_loss(model, sample, reduce=reduce)
         
         logging_output["loss"] = loss.data
-        logging_output["cmr_loss"] = cmr_loss.data if torch.is_tensor(cmr_loss) else cmr_loss
+        logging_output["cmr_loss"] = cmr_loss.data
         logging_output["moe_loss"] = moe_loss.data if torch.is_tensor(moe_loss) else moe_loss
         
         logging_output.update(moe_metadata)

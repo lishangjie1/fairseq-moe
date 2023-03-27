@@ -88,7 +88,7 @@ class CMRLayer(torch.nn.Module):
         l_aux["cmr_gate_loss_num"] = used_budget
         l_aux["cmr_gate_loss_denom"] = total_budget
 
-        self.moe_layer.metadata["cmr_share_rate"] = (1 - gates).mean()
+        self.moe_layer.metadata["cmr_share_rate"] = (1 - gates).mean().data
 
         #self.moe_layer.metadata["cmr_lang_gates"] = 0
         # if prefix_tokens is not None and self.lang_idx is not None:
