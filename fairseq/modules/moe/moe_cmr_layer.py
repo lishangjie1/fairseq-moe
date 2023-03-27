@@ -26,7 +26,7 @@ class CMRGate(torch.nn.Module):
             input = torch.cat([input, lang_embeddings], dim=1)
         logits = self.wg(input)
         gates = logits.squeeze(-1).sigmoid()
-        gates = self.dropout(gates)
+        # gates = self.dropout(gates)
         if input_mask is not None and input_mask.any():
             nonpadding = ~input_mask.bool()
             gates = gates * nonpadding.to(gates.dtype)
@@ -74,7 +74,10 @@ class CMRLayer(torch.nn.Module):
         x_moe, l_aux = self.moe_layer(
             *input, input_padding_mask=input_padding_mask, **kwargs
         )
-        x_out = x_ffn * (1 - gates).unsqueeze(-1) + x_moe * gates.unsqueeze(-1)
+
+        share_gates = self.gate.dropout(1 - gates)
+        moe_gates = self.gate.dropout(gates)
+        x_out = x_ffn * share_gates.unsqueeze(-1) + x_moe * moe_gates.unsqueeze(-1)
 
         if input_padding_mask is None:
             input_padding_mask = torch.zeros_like(input[0][:, 0], dtype=torch.bool)

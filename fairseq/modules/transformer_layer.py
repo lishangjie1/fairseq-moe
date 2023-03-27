@@ -385,11 +385,13 @@ class TransformerEncoderLayer(nn.Module):
             if encoder_padding_mask is not None:
                 nonpadding =~encoder_padding_mask.bool()
                 x = x[nonpadding] # drop pad token
-                lang_embeddings = lang_embeddings[nonpadding]
+                if lang_embeddings is not None:
+                    lang_embeddings = lang_embeddings[nonpadding]
             else:
                 # reshape x into (bsz*seq, dmodel)
                 x = x.reshape(-1, x.shape[-1])
-                lang_embeddings = lang_embeddings.reshape(-1, x.shape[-1])
+                if lang_embeddings is not None:
+                    lang_embeddings = lang_embeddings.reshape(-1, x.shape[-1])
  
             x, l_aux = self.moe_module(x, lang_embeddings=lang_embeddings)
 
@@ -743,11 +745,13 @@ class TransformerDecoderLayer(nn.Module):
             if self.training and self_attn_padding_mask is not None:
                 nonpadding =~self_attn_padding_mask.bool()
                 x = x[nonpadding] # drop pad token
-                lang_embeddings = lang_embeddings[nonpadding]
+                if lang_embeddings is not None:
+                    lang_embeddings = lang_embeddings[nonpadding]
             else:
                 # reshape x into (bsz*seq, dmodel)
                 x = x.reshape(-1, x.shape[-1])
-                lang_embeddings = lang_embeddings.reshape(-1, x.shape[-1])
+                if lang_embeddings is not None:
+                    lang_embeddings = lang_embeddings.reshape(-1, x.shape[-1])
 
             x, l_aux = self.moe_module(x, lang_embeddings=lang_embeddings)
 
