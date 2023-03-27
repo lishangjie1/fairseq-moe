@@ -232,7 +232,7 @@ class MOELayer(Base):
 
         self.record_all_to_all_stats()
         # self.record_expert_choices(dispatch_mask[:, :, :reshaped_input_shape[0]]) # dispatch_mask: ecs
-        return combined_output, l_aux
+        return combined_output, {"moe_gate_loss": l_aux}
 
     def prepare_for_inference_(self):
         self.in_generation = True

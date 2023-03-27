@@ -225,16 +225,23 @@ class TransformerEncoderLayer(nn.Module):
             self.is_use_moe_cmr = args.use_moe_cmr
 
             if args.use_moe_cmr:
-                self.cmr_gate = self.build_cmr_gate(args, self.embed_dim, self.dropout_module) # share or moe
-                self.max_temp, self.min_temp, self.temp_decay = [float(x) for x in args.moe_cmr_temp.split(",")]
-                self.share_expert = self.build_cmr(
+                from fairseq.modules.moe.moe_cmr_layer import CMRLayer
+                self.share_expert = self.build_share_ffn(
                         args, self.embed_dim, ffn_dim, self.dropout_module
                     )
-        self.final_layer_norm = LayerNorm(self.embed_dim)
-    def build_cmr_gate(self, args, embed_dim, dropout_module):
-        return CMR_Gate(args, embed_dim, embed_dim // 4, 2, dropout_module)
+                self.moe_module = CMRLayer(self.moe_layer, self.share_expert, self.embed_dim, getattr(args, "moe_cmr_dropout", 0.0))
 
-    def build_cmr(self, args, embed_dim, expert_ffn_dim, dropout_module):
+                #self.cmr_gate = self.build_cmr_gate(args, self.embed_dim, self.dropout_module) # share or moe
+                #self.max_temp, self.min_temp, self.temp_decay = [float(x) for x in args.moe_cmr_temp.split(",")]
+            else:
+                self.moe_module = self.moe_layer
+
+
+        self.final_layer_norm = LayerNorm(self.embed_dim)
+    # def build_cmr_gate(self, args, embed_dim, dropout_module):
+    #     return CMR_Gate(args, embed_dim, embed_dim // 4, 2, dropout_module)
+
+    def build_share_ffn(self, args, embed_dim, expert_ffn_dim, dropout_module):
         return FeedForwardNetwork(args, embed_dim, expert_ffn_dim, dropout_module)
     def build_gate(self, args):
         if args.moe_top1_expert:
@@ -305,11 +312,6 @@ class TransformerEncoderLayer(nn.Module):
                 if k in state_dict:
                     state_dict["{}.{}.{}".format(name, new, m)] = state_dict[k]
                     del state_dict[k]
-    def set_num_updates(self, num_updates):
-        if self.is_moe_layer and self.is_use_moe_cmr:
-            self.curr_temp = max(
-                self.max_temp * self.temp_decay ** num_updates, self.min_temp
-            )
     def forward(self, 
                 x, 
                 encoder_padding_mask: Optional[Tensor],
@@ -383,42 +385,8 @@ class TransformerEncoderLayer(nn.Module):
             else:
                 # reshape x into (bsz*seq, dmodel)
                 x = x.reshape(-1, x.shape[-1])
-            # cmr
-            if self.is_use_moe_cmr:
-                def record_cmr(routing, metadata):
-                    metadata['cmr_share_rate'] = routing.sum() / len(routing)
-
-                cmr_logits = self.cmr_gate(x) # bsz*seq, 2
-                if self.training:
-                    hard_cmr = F.gumbel_softmax(cmr_logits.float(), tau=self.curr_temp, hard=True).type_as(x)
-                    hard_cmr = hard_cmr.argmax(dim=1).bool()
-                    if hard_cmr.all():
-                        # Need one token routing to moe at least for fsdp training
-                        # In consequence, random routing a token to moe
-                        hard_cmr[np.random.randint(0, len(hard_cmr))] = 0
-                else:
-                    hard_cmr = cmr_logits.argmax(dim=1).bool() # 1 for share, 0 for moe
-                x_share = self.share_expert(x[hard_cmr])
-                x_moe = x[~hard_cmr]
-                if len(x_moe) == 0:
-                    # dummy token for moe in inference
-                    x_moe = torch.zeros((1, x.shape[1]), device=x.device, dtype=x.dtype)
-                    x_moe, l_aux = self.moe_layer(x_moe, lang_embeddings=lang_embeddings, sentence_embeddings=sentence_embeddings)
-                    x_moe, l_aux = None, 0.0
-                else:
-                    x_moe, l_aux = self.moe_layer(x_moe, lang_embeddings=lang_embeddings, sentence_embeddings=sentence_embeddings)
-            else:
-                x_share = None
-                x_moe = x
-                x_moe, l_aux = self.moe_layer(x_moe, lang_embeddings=lang_embeddings, sentence_embeddings=sentence_embeddings)
-            
-            # back into x
-            if x_share is not None:
-                x[hard_cmr] = x_share
-                if x_moe is not None:
-                    x[~hard_cmr] = x_moe
-            else:
-                x = x_moe
+ 
+            x, l_aux = self.moe_module(x)
 
             if encoder_padding_mask is not None:
                 new_x = torch.zeros(x_shape, device=x.device, dtype=x.dtype)
@@ -426,9 +394,6 @@ class TransformerEncoderLayer(nn.Module):
                 x = new_x
             else:
                 x = x.reshape(x_shape)
-            
-            if self.is_use_moe_cmr:
-                record_cmr(hard_cmr, self.moe_layer.metadata)
             
             x = x.transpose(0, 1) # seq_len, batch_size, model_dim
         x = self.residual_connection(x, residual)
@@ -527,12 +492,16 @@ class TransformerDecoderLayer(nn.Module):
             self.moe_layer = self.build_moe_layer(gate, experts, args)
             self.is_use_moe_cmr = args.use_moe_cmr
             if args.use_moe_cmr:
-                self.cmr_gate = self.build_cmr_gate(args, self.embed_dim, self.dropout_module) # share or moe
-                self.max_temp, self.min_temp, self.temp_decay = [float(x) for x in args.moe_cmr_temp.split(",")]
-                self.share_expert = self.build_cmr(
+                from fairseq.modules.moe.moe_cmr_layer import CMRLayer
+                self.share_expert = self.build_share_ffn(
                         args, self.embed_dim, ffn_dim, self.dropout_module
                     )
+                self.moe_module = CMRLayer(self.moe_layer, self.share_expert, self.embed_dim, getattr(args, "moe_cmr_dropout", 0.0))
 
+                #self.cmr_gate = self.build_cmr_gate(args, self.embed_dim, self.dropout_module) # share or moe
+                #self.max_temp, self.min_temp, self.temp_decay = [float(x) for x in args.moe_cmr_temp.split(",")]
+            else:
+                self.moe_module = self.moe_layer
 
         self.final_layer_norm = LayerNorm(self.embed_dim, export=export)
         self.need_attn = True
@@ -540,9 +509,9 @@ class TransformerDecoderLayer(nn.Module):
         self.onnx_trace = False
 
         self.args = args
-    def build_cmr_gate(self, args, embed_dim, dropout_module):
-        return CMR_Gate(args, embed_dim, embed_dim // 4, 2, dropout_module)
-    def build_cmr(self, args, embed_dim, expert_ffn_dim, dropout_module):
+    # def build_cmr_gate(self, args, embed_dim, dropout_module):
+    #     return CMR_Gate(args, embed_dim, embed_dim // 4, 2, dropout_module)
+    def build_share_ffn(self, args, embed_dim, expert_ffn_dim, dropout_module):
         return FeedForwardNetwork(args, embed_dim, expert_ffn_dim, dropout_module)
     def build_gate(self, args):
         if args.moe_top1_expert:
@@ -612,11 +581,6 @@ class TransformerDecoderLayer(nn.Module):
     def residual_connection(self, x, residual):
         return residual + x
 
-    def set_num_updates(self, num_updates):
-        if self.is_moe_layer and self.is_use_moe_cmr:
-            self.curr_temp = max(
-                self.max_temp * self.temp_decay ** num_updates, self.min_temp
-            )
     def forward(
         self,
         x,
@@ -774,42 +738,8 @@ class TransformerDecoderLayer(nn.Module):
             else:
                 # reshape x into (bsz*seq, dmodel)
                 x = x.reshape(-1, x.shape[-1])
-            # cmr
-            if self.is_use_moe_cmr:
-                def record_cmr(routing, metadata):
-                    metadata['cmr_share_rate'] = routing.sum() / len(routing)
 
-                cmr_logits = self.cmr_gate(x) # bsz*seq, 2
-                if self.training:
-                    hard_cmr = F.gumbel_softmax(cmr_logits.float(), tau=self.curr_temp, hard=True).type_as(x)
-                    hard_cmr = hard_cmr.argmax(dim=1).bool()
-                    if hard_cmr.all():
-                        # Need one token routing to moe at least for fsdp training
-                        # In consequence, random routing a token to moe
-                        hard_cmr[np.random.randint(0, len(hard_cmr))] = 0
-                else:
-                    hard_cmr = cmr_logits.argmax(dim=1).bool() # 1 for share, 0 for moe
-                x_share = self.share_expert(x[hard_cmr])
-                x_moe = x[~hard_cmr]
-                if len(x_moe) == 0:
-                    # dummy token for moe in inference
-                    x_moe = torch.zeros((1, x.shape[1]), device=x.device, dtype=x.dtype)
-                    x_moe, l_aux = self.moe_layer(x_moe, lang_embeddings=lang_embeddings, sentence_embeddings=sentence_embeddings)
-                    x_moe, l_aux = None, 0.0
-                else:
-                    x_moe, l_aux = self.moe_layer(x_moe, lang_embeddings=lang_embeddings, sentence_embeddings=sentence_embeddings)
-            else:
-                x_share = None
-                x_moe = x
-                x_moe, l_aux = self.moe_layer(x_moe, lang_embeddings=lang_embeddings, sentence_embeddings=sentence_embeddings)
-
-            # back into x
-            if x_share is not None:
-                x[hard_cmr] = x_share
-                if x_moe is not None:
-                    x[~hard_cmr] = x_moe
-            else:
-                x = x_moe
+            x, l_aux = self.moe_module(x)
 
             if self.training and self_attn_padding_mask is not None:
                 new_x = torch.zeros(x_shape, device=x.device, dtype=x.dtype)
@@ -818,10 +748,6 @@ class TransformerDecoderLayer(nn.Module):
             else:
                 x = x.reshape(x_shape)
 
-            # record cmr routing rate
-            if self.is_use_moe_cmr:
-                record_cmr(hard_cmr, self.moe_layer.metadata)
-            
             x = x.transpose(0, 1) # seq_len, batch_size, model_dim
         x = self.residual_connection(x, residual)
         if not self.normalize_before:

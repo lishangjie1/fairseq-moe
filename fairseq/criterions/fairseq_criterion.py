@@ -6,7 +6,7 @@
 import inspect
 import math
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import torch
 import torch.nn.functional as F
@@ -148,6 +148,18 @@ class MoECriterionConfig(FairseqDataclass):
             "help": "Transformation to apply to the gate loss ('none', 'neg_log')"
         }
     )
+    cmr_gate_loss_p: Optional[float] = field(
+        default=1.0,
+        metadata={
+            "help": "In CMR loss, encourages fraction of tokens p to be routed to MOE layers"
+        },
+    )
+    cmr_gate_loss_wt: Optional[float] = field(
+        default=0.0,
+        metadata={
+            "help": "Weight associated with CMR loss in the weighted sum of CMR, MoE gate loss, and cross entropy loss"
+        },
+    )
     sentence_avg: bool = II("optimization.sentence_avg")
 
 class MoECriterion(FairseqCriterion):
@@ -168,11 +180,21 @@ class MoECriterion(FairseqCriterion):
         "unrouted_token_rate",
         "sparsity",
     ]
-    def __init__(self, task, moe_gate_loss_wt, moe_gate_loss_combine_method, moe_gate_loss_transform, sentence_avg):
+    def __init__(
+            self, 
+            task, 
+            moe_gate_loss_wt, 
+            moe_gate_loss_combine_method, 
+            moe_gate_loss_transform, 
+            cmr_gate_loss_p,
+            cmr_gate_loss_wt,
+            sentence_avg):
         super().__init__(task)
         self.gate_loss_weight = moe_gate_loss_wt
         self.gate_loss_combine_method = moe_gate_loss_combine_method
         self.gate_loss_transform = moe_gate_loss_transform
+        self.cmr_gate_loss_p = cmr_gate_loss_p
+        self.cmr_gate_loss_weight = cmr_gate_loss_wt
         self.sentence_avg = sentence_avg
 
     def forward(self, model, sample, reduce=True):
@@ -183,10 +205,12 @@ class MoECriterion(FairseqCriterion):
         2) the sample size, which is used as the denominator for the gradient
         3) logging outputs to display while training
         """
-        loss, inner_loss, moe_loss, moe_metadata, sample_size, logging_output = self.compute_loss(model, sample, reduce=reduce)
-
+        loss, inner_loss, moe_loss, cmr_loss, moe_metadata, sample_size, logging_output = self.compute_loss(model, sample, reduce=reduce)
+        
         logging_output["loss"] = loss.data
+        logging_output["cmr_loss"] = cmr_loss.data if torch.is_tensor(cmr_loss) else cmr_loss
         logging_output["moe_loss"] = moe_loss.data if torch.is_tensor(moe_loss) else moe_loss
+        
         logging_output.update(moe_metadata)
 
         return loss, sample_size, logging_output
@@ -197,17 +221,42 @@ class MoECriterion(FairseqCriterion):
         gate_count = 0
         for l_aux in net_output[1]["l_aux"]:
             if l_aux is not None:
-                gate_loss += l_aux
+                gate_loss += l_aux["moe_gate_loss"]
                 gate_count += 1
+        # avoid float16 overflow
+        cmr_gate_used_sum = torch.zeros_like(gate_loss, dtype=torch.float32)
+        cmr_gate_total_sum = torch.zeros_like(gate_loss, dtype=torch.float32)
+        for l_aux in net_output[1]["l_aux"]:
+            if l_aux is not None:
+                cmr_gate_used = l_aux["cmr_gate_loss_num"]
+                if cmr_gate_used is not None:
+                    cmr_gate_used_sum += cmr_gate_used
+
+        for l_aux in net_output[1]["l_aux"]:
+            if l_aux is not None:
+                cmr_gate_total = l_aux["cmr_gate_loss_denom"]
+                if cmr_gate_total is not None:
+                    cmr_gate_total_sum += cmr_gate_total
+        
+        cmr_gate_loss = torch.zeros_like(gate_loss)
+        if self.cmr_gate_loss_weight > 0:
+            cmr_gate_loss = (
+                (cmr_gate_used_sum / cmr_gate_total_sum.clamp(1e-5))
+                - self.cmr_gate_loss_p
+            ).abs()
+
+
+
         if self.gate_loss_combine_method == "average":
             gate_loss = gate_loss / gate_count
         if self.gate_loss_transform == "neg_log":
             gate_loss = - torch.log(gate_loss)
         # print(f'before scale:{gate_loss}')
         gate_loss = sample_size * gate_loss
+        cmr_gate_loss = sample_size * cmr_gate_loss
         # print(f'after scale:{gate_loss}')
-        loss = inner_loss + self.gate_loss_weight * gate_loss
-        return loss, inner_loss, gate_loss, self.get_moe_metadata(model), sample_size, logging_output
+        loss = inner_loss + self.gate_loss_weight * gate_loss + self.cmr_gate_loss_weight * cmr_gate_loss
+        return loss, inner_loss, gate_loss, cmr_gate_loss, self.get_moe_metadata(model), sample_size, logging_output
 
     def compute_inner_loss(self, model, sample):
         """Compute the non-MoE portion of the loss. Default is cross-entropy"""
@@ -231,6 +280,7 @@ class MoECriterion(FairseqCriterion):
         """Aggregate logging outputs from data parallel training."""
         loss_sum = sum(log.get("loss", 0) for log in logging_outputs)
         moe_loss_sum = sum(log.get("moe_loss", 0) for log in logging_outputs)
+        cmr_loss_sum = sum(log.get("cmr_loss", 0) for log in logging_outputs)
         ntokens = sum(log.get("ntokens", 0) for log in logging_outputs)
         sample_size = sum(log.get("sample_size", 0) for log in logging_outputs)
 
@@ -240,6 +290,9 @@ class MoECriterion(FairseqCriterion):
         )
         metrics.log_scalar(
             "moe_gate_loss", moe_loss_sum / sample_size, sample_size, round=8
+        )
+        metrics.log_scalar(
+            "cmr_gate_loss", cmr_loss_sum / sample_size, sample_size, round=8
         )
         batch_count = sum(log.get("batch_count", 0) for log in logging_outputs)
         for key in MoECriterion.moe_logging_keys:

@@ -79,9 +79,8 @@
                 "--max-tokens", "2048",
                 "--record-a2a-perf-stats",
                 "--tensorboard-logdir", "/data/lsj/moe/fairseq-moe/tensorboard_dir",
-                "--enable-lang-ids", "--use-moe-cmr", "--find-unused-parameters",
-                "--restore-file", "/data/lsj/nfs/moe/dense_model/checkpoint_last.pt",
-                "--reset-optimizer", "--reset-meters", "--reset-dataloader", "--reset-lr-scheduler"
+                "--use-moe-cmr", "--moe-cmr-dropout", "0.2", "--cmr-gate-loss-p", "0.8", "--cmr-gate-loss-wt", "0.1"
+
             ]
             // "args":[
             //     "--nproc_per_node", "2", "--master_addr", "127.0.0.1", "--master_port", "12345",
