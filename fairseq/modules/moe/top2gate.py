@@ -298,7 +298,7 @@ class Top2Gate(torch.nn.Module):
     ) -> None:
         super().__init__()
         if use_moe_lang_perception:
-            self.wg = torch.nn.Linear(3*model_dim, num_experts, bias=False)
+            self.wg = torch.nn.Linear(2*model_dim, num_experts, bias=False)
         else:
             self.wg = torch.nn.Linear(model_dim, num_experts, bias=False)
         self.use_fp32 = use_fp32
@@ -320,8 +320,7 @@ class Top2Gate(torch.nn.Module):
         if logits is None:
             if self.use_moe_lang_perception:
                 assert lang_embeddings is not None
-                assert sentence_embeddings is not None
-                input = torch.cat([input, lang_embeddings, sentence_embeddings], dim=1)
+                input = torch.cat([input, lang_embeddings], dim=1)
                 logits = self.wg(input)
             else:
                 logits = self.wg(input)

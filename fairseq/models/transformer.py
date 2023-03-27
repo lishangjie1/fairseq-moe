@@ -264,15 +264,17 @@ class TransformerModel(FairseqEncoderDecoderModel):
         parser.add_argument('--moe-expert-output-masking', type=float, default=0.0,
                             help="moe expert output masking (EOM) regularization strategy")
         parser.add_argument('--use-moe-lang-perception', default=False, action='store_true',
-                            help='if true use a language perception module to partially mask moe expert')
+                            help='if true use a language embedding to help moe routing')
         parser.add_argument('--use-encoder-moe-lang-perception', default=False, action='store_true',
-                            help='if true use a language perception module to partially mask moe expert')
+                            help='if true use a language embedding to help moe routing in encoder')
         parser.add_argument('--use-decoder-moe-lang-perception', default=False, action='store_true',
-                            help='if true use a language perception module to partially mask moe expert')
+                            help='if true use a language embedding to help moe routing in decoder')
         parser.add_argument('--use-moe-cmr', default=False, action='store_true',
                             help='if true use a share ffn in moe_layer')
         parser.add_argument('--moe-cmr-dropout', type=float, default=0.0,
                             help="dropout rate for cmr gate")
+        parser.add_argument('--use-cmr-lang-perception', default=False, action='store_true',
+                            help='if true use a language embedding to help cmr routing')
         parser.add_argument('--moe-cmr-temp', type=str, default="2,0.1,0.99995",
                             help='cmr temperature for gumbel softmax')
         parser.add_argument('--capacity-factor', type=float, default=1.0,

@@ -142,7 +142,7 @@ def _main(cfg: DictConfig, output_file):
             moe_freq = 1
         else:
             moe_freq = 0
-        if cfg.distributed_training.ddp_backend=='fully_sharded':
+        if cfg.distributed_training.ddp_backend=='fully_sharded' and cfg.distributed_training.use_sharded_state:
             cfg.checkpoint.checkpoint_suffix += f"-shard{torch.distributed.get_rank()}"
 
     models, saved_cfg = checkpoint_utils.load_model_ensemble(

@@ -7,7 +7,7 @@
 Legacy entry point. Use fairseq_cli/train.py or fairseq-train instead.
 """
 import os
-os.environ["CUDA_VISIBLE_DEVICES"]="3,4"
+os.environ["CUDA_VISIBLE_DEVICES"]="3,6"
 from fairseq_cli.train import cli_main
 
 

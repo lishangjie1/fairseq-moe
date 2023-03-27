@@ -163,26 +163,25 @@ class MOELayer(Base):
 
         
         lang_embeddings = kwargs.get("lang_embeddings", None)
-        sentence_embeddings = kwargs.get("sentence_embeddings", None)
+        #sentence_embeddings = kwargs.get("sentence_embeddings", None)
         if self.gate.use_moe_lang_perception:
-            assert sentence_embeddings is not None
+            #assert sentence_embeddings is not None
             assert lang_embeddings is not None
             assert lang_embeddings.shape[0] == input_shape[0], f"{lang_embeddings.shape}, {input_shape}"
-            assert lang_embeddings.shape[2] == input_shape[2], f"{lang_embeddings.shape}, {input_shape}"
-            lang_embeddings = lang_embeddings.expand(input_shape).reshape(-1, d_model)
+            assert lang_embeddings.shape[1] == input_shape[1], f"{lang_embeddings.shape}, {input_shape}"
             padded_lang_embeddings = torch.zeros(
                 (expected_dim, lang_embeddings.shape[1]),
                 dtype=lang_embeddings.dtype, layout=lang_embeddings.layout, device=lang_embeddings.device)
             padded_lang_embeddings[:lang_embeddings.shape[0], :] = lang_embeddings
             lang_embeddings = padded_lang_embeddings
             # pad for sentence embeddings
-            sentence_embeddings = sentence_embeddings.reshape(-1, d_model)
-            padded_sentence_embeddings = torch.zeros(
-                (expected_dim, sentence_embeddings.shape[1]),
-                dtype=sentence_embeddings.dtype, layout=sentence_embeddings.layout, device=sentence_embeddings.device)
+            # sentence_embeddings = sentence_embeddings.reshape(-1, d_model)
+            # padded_sentence_embeddings = torch.zeros(
+            #     (expected_dim, sentence_embeddings.shape[1]),
+            #     dtype=sentence_embeddings.dtype, layout=sentence_embeddings.layout, device=sentence_embeddings.device)
 
-            padded_sentence_embeddings[:sentence_embeddings.shape[0], :] = sentence_embeddings
-            sentence_embeddings = padded_sentence_embeddings
+            # padded_sentence_embeddings[:sentence_embeddings.shape[0], :] = sentence_embeddings
+            # sentence_embeddings = padded_sentence_embeddings
         
         if self.use_tutel:
             l_aux, self.metadata, C, E, indices_, locations_, gates_ = self.gate(reshaped_input, reshaped_input_padding_mask, has_tutel=True)
@@ -193,7 +192,7 @@ class MOELayer(Base):
             self._tutel_dispatcher.update(indices_, locations_, gates_, capacity=C)
             dispatched_input = self._tutel_dispatcher.encode(reshaped_input)
         else:
-            l_aux, combine_weights, dispatch_mask, self.metadata = self.gate(reshaped_input, reshaped_input_padding_mask, has_tutel=False, lang_embeddings=lang_embeddings, sentence_embeddings=sentence_embeddings)
+            l_aux, combine_weights, dispatch_mask, self.metadata = self.gate(reshaped_input, reshaped_input_padding_mask, has_tutel=False, lang_embeddings=lang_embeddings)
 
             dispatch_mask = dispatch_mask.to(input.dtype).permute(1, 2, 0)  # S,E,C -> E,C,S
             E, C, S = dispatch_mask.size()

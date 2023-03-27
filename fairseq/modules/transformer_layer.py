@@ -229,7 +229,7 @@ class TransformerEncoderLayer(nn.Module):
                 self.share_expert = self.build_share_ffn(
                         args, self.embed_dim, ffn_dim, self.dropout_module
                     )
-                self.moe_module = CMRLayer(self.moe_layer, self.share_expert, self.embed_dim, getattr(args, "moe_cmr_dropout", 0.0))
+                self.moe_module = CMRLayer(self.moe_layer, self.share_expert, self.embed_dim, getattr(args, "moe_cmr_dropout", 0.0), use_cmr_lang_perception=getattr(args, "use_cmr_lang_perception", False))
 
                 #self.cmr_gate = self.build_cmr_gate(args, self.embed_dim, self.dropout_module) # share or moe
                 #self.max_temp, self.min_temp, self.temp_decay = [float(x) for x in args.moe_cmr_temp.split(",")]
@@ -369,24 +369,29 @@ class TransformerEncoderLayer(nn.Module):
         else:
             # x - seq_len, batch_size, model_dim
             x = x.transpose(0, 1) # batch_size, seq_len, model_dim
-            sentence_embeddings = None
-            if self.moe_layer.gate.use_moe_lang_perception:
-                assert len(x.shape) == 3
-                sentence_padding_mask = torch.ones((x.shape[0], x.shape[1]), device=x.device, dtype=x.dtype)
-                if encoder_padding_mask is not None:
-                    sentence_padding_mask[encoder_padding_mask] = 0
-                sentence_embeddings = (x * sentence_padding_mask.unsqueeze(-1)).sum(dim=1) / torch.clamp(sentence_padding_mask.sum(dim=1).unsqueeze(-1), min=1e-9)
-                sentence_embeddings = sentence_embeddings.unsqueeze(1).expand(x.shape) # (bsz, seq, hidden)
+            # sentence_embeddings = None
+            # if self.moe_layer.gate.use_moe_lang_perception:
+            #     assert len(x.shape) == 3
+            #     sentence_padding_mask = torch.ones((x.shape[0], x.shape[1]), device=x.device, dtype=x.dtype)
+            #     if encoder_padding_mask is not None:
+            #         sentence_padding_mask[encoder_padding_mask] = 0
+            #     sentence_embeddings = (x * sentence_padding_mask.unsqueeze(-1)).sum(dim=1) / torch.clamp(sentence_padding_mask.sum(dim=1).unsqueeze(-1), min=1e-9)
+            #     sentence_embeddings = sentence_embeddings.unsqueeze(1).expand(x.shape) # (bsz, seq, hidden)
 
             x_shape = x.shape
+            if lang_embeddings is not None:
+                lang_embeddings = lang_embeddings.expand(x_shape)
             # drop pad token
             if encoder_padding_mask is not None:
-                x = x[~encoder_padding_mask.bool()] # drop pad token
+                nonpadding =~encoder_padding_mask.bool()
+                x = x[nonpadding] # drop pad token
+                lang_embeddings = lang_embeddings[nonpadding]
             else:
                 # reshape x into (bsz*seq, dmodel)
                 x = x.reshape(-1, x.shape[-1])
+                lang_embeddings = lang_embeddings.reshape(-1, x.shape[-1])
  
-            x, l_aux = self.moe_module(x)
+            x, l_aux = self.moe_module(x, lang_embeddings=lang_embeddings)
 
             if encoder_padding_mask is not None:
                 new_x = torch.zeros(x_shape, device=x.device, dtype=x.dtype)
@@ -496,7 +501,7 @@ class TransformerDecoderLayer(nn.Module):
                 self.share_expert = self.build_share_ffn(
                         args, self.embed_dim, ffn_dim, self.dropout_module
                     )
-                self.moe_module = CMRLayer(self.moe_layer, self.share_expert, self.embed_dim, getattr(args, "moe_cmr_dropout", 0.0))
+                self.moe_module = CMRLayer(self.moe_layer, self.share_expert, self.embed_dim, getattr(args, "moe_cmr_dropout", 0.0), use_cmr_lang_perception=getattr(args, "use_cmr_lang_perception", False))
 
                 #self.cmr_gate = self.build_cmr_gate(args, self.embed_dim, self.dropout_module) # share or moe
                 #self.max_temp, self.min_temp, self.temp_decay = [float(x) for x in args.moe_cmr_temp.split(",")]
@@ -709,37 +714,42 @@ class TransformerDecoderLayer(nn.Module):
         else:
             # x - seq_len, batch_size, model_dim
             x = x.transpose(0, 1) # batch_size, seq_len, model_dim
-            sentence_embeddings = None
-            if self.moe_layer.gate.use_moe_lang_perception:
-                if incremental_state is None: # training
-                    if self_attn_mask is not None:
-                        sentence_padding_mask = (self_attn_mask==0).unsqueeze(0).expand((x.shape[0], x.shape[1],x.shape[1]))
-                        sentence_padding_mask = sentence_padding_mask.type(x.dtype)
-                    else:
-                        sentence_padding_mask = torch.ones((x.shape[0], x.shape[1], x.shape[1]), device=x.device, dtype=x.dtype)
-                    sentence_embeddings = sentence_padding_mask.bmm(x) / sentence_padding_mask.sum(dim=-1, keepdim=True) # (bsz, seq, hidden_size)
-                    if self_attn_padding_mask is not None:
-                        sentence_embeddings[self_attn_padding_mask.bool()] = 0
-                else: # inference
-                    # load the previous hidden state from incremental_state
-                    prev_hidden_state = self.encoder_attn.get_incremental_state(incremental_state, "prev_hidden_state")
-                    if prev_hidden_state is None: # the first step in decoding
-                        sentence_embeddings = x # (bsz, 1, hidden_size)
-                        self.encoder_attn.set_incremental_state(incremental_state, "prev_hidden_state", x)
-                    else:
-                        all_hidden_state = torch.cat([prev_hidden_state, x], dim=1) # (bsz, seq, hidden_size)
-                        sentence_embeddings = all_hidden_state.mean(dim=1, keepdim=True) # (bsz, 1, hidden_size)
-                        self.encoder_attn.set_incremental_state(incremental_state, "prev_hidden_state", all_hidden_state)
+            # sentence_embeddings = None
+            # if self.moe_layer.gate.use_moe_lang_perception:
+            #     if incremental_state is None: # training
+            #         if self_attn_mask is not None:
+            #             sentence_padding_mask = (self_attn_mask==0).unsqueeze(0).expand((x.shape[0], x.shape[1],x.shape[1]))
+            #             sentence_padding_mask = sentence_padding_mask.type(x.dtype)
+            #         else:
+            #             sentence_padding_mask = torch.ones((x.shape[0], x.shape[1], x.shape[1]), device=x.device, dtype=x.dtype)
+            #         sentence_embeddings = sentence_padding_mask.bmm(x) / sentence_padding_mask.sum(dim=-1, keepdim=True) # (bsz, seq, hidden_size)
+            #         if self_attn_padding_mask is not None:
+            #             sentence_embeddings[self_attn_padding_mask.bool()] = 0
+            #     else: # inference
+            #         # load the previous hidden state from incremental_state
+            #         prev_hidden_state = self.encoder_attn.get_incremental_state(incremental_state, "prev_hidden_state")
+            #         if prev_hidden_state is None: # the first step in decoding
+            #             sentence_embeddings = x # (bsz, 1, hidden_size)
+            #             self.encoder_attn.set_incremental_state(incremental_state, "prev_hidden_state", x)
+            #         else:
+            #             all_hidden_state = torch.cat([prev_hidden_state, x], dim=1) # (bsz, seq, hidden_size)
+            #             sentence_embeddings = all_hidden_state.mean(dim=1, keepdim=True) # (bsz, 1, hidden_size)
+            #             self.encoder_attn.set_incremental_state(incremental_state, "prev_hidden_state", all_hidden_state)
             
             x_shape = x.shape
+            if lang_embeddings is not None:
+                lang_embeddings = lang_embeddings.expand(x_shape)
             # drop pad token
             if self.training and self_attn_padding_mask is not None:
-                x = x[~self_attn_padding_mask.bool()] # drop pad token in training
+                nonpadding =~self_attn_padding_mask.bool()
+                x = x[nonpadding] # drop pad token
+                lang_embeddings = lang_embeddings[nonpadding]
             else:
                 # reshape x into (bsz*seq, dmodel)
                 x = x.reshape(-1, x.shape[-1])
+                lang_embeddings = lang_embeddings.reshape(-1, x.shape[-1])
 
-            x, l_aux = self.moe_module(x)
+            x, l_aux = self.moe_module(x, lang_embeddings=lang_embeddings)
 
             if self.training and self_attn_padding_mask is not None:
                 new_x = torch.zeros(x_shape, device=x.device, dtype=x.dtype)

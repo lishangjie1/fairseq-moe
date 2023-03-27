@@ -20,7 +20,10 @@ class CMRGate(torch.nn.Module):
         self,
         input: torch.Tensor,
         input_mask: Optional[torch.Tensor] = None,
+        lang_embeddings=None,
     ) -> torch.Tensor:
+        if lang_embeddings is not None:
+            input = torch.cat([input, lang_embeddings], dim=1)
         logits = self.wg(input)
         gates = logits.squeeze(-1).sigmoid()
         gates = self.dropout(gates)
@@ -37,12 +40,17 @@ class CMRLayer(torch.nn.Module):
         ffn_fn: Callable,
         model_dim: int,
         p: float = 0.0,
+        use_cmr_lang_perception = False,
         lang_idx: Optional[torch.Tensor] = None,
     ) -> None:
         super().__init__()
         self.moe_layer = moe_layer
         self.ffn_fn = ffn_fn
-        self.gate = CMRGate(model_dim, p)
+        self.use_cmr_lang_perception = use_cmr_lang_perception
+        if use_cmr_lang_perception:
+            self.gate = CMRGate(model_dim*2, p)
+        else:
+            self.gate = CMRGate(model_dim, p)
         if lang_idx is not None:
             self.register_buffer("lang_idx", lang_idx)
         else:
@@ -56,10 +64,15 @@ class CMRLayer(torch.nn.Module):
     ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         assert len(input) == 1, "only single input Tensor supported"
 
-        gates = self.gate(input[0], input_padding_mask)
+        if self.use_cmr_lang_perception:
+            lang_embeddings = kwargs.get("lang_embeddings", None)
+            assert lang_embeddings is not None
+            gates = self.gate(input[0], input_padding_mask, lang_embeddings)
+        else:
+            gates = self.gate(input[0], input_padding_mask)
         x_ffn = self.ffn_fn(*input)
         x_moe, l_aux = self.moe_layer(
-            *input, input_padding_mask=input_padding_mask
+            *input, input_padding_mask=input_padding_mask, **kwargs
         )
         x_out = x_ffn * (1 - gates).unsqueeze(-1) + x_moe * gates.unsqueeze(-1)
 
