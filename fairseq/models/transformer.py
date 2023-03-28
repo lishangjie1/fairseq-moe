@@ -692,9 +692,12 @@ class TransformerEncoder(FairseqEncoder):
         }
     
     def collect_expert_choices(self, src_tokens):
+        pad_token = self.dictionary.pad()
+        real_tokens_idx = src_tokens.ne(pad_token)
+        src_tokens = src_tokens[real_tokens_idx]
         num_expert=self.args.moe_expert_count
         src_vocab_size=self.embed_tokens.num_embeddings
-        src_tokens=utils.one_hot(src_tokens.view(-1), src_vocab_size, unsqueeze_indices=True)
+        src_tokens=utils.one_hot(src_tokens, src_vocab_size, unsqueeze_indices=True)
 
         enc_moe_layer_num=sum([l.is_moe_layer for l in self.layers])
 
@@ -704,7 +707,7 @@ class TransformerEncoder(FairseqEncoder):
         moe_layer_cnt=0
         for layer in self.layers:
             if layer.is_moe_layer:
-                expert_choices=layer.moe_layer.metadata['expert_choices']
+                expert_choices=layer.moe_layer.metadata['expert_choices'] # (e,s)
                 new_token_expert=torch.einsum('nv,en->ve', src_tokens.float(), expert_choices.float())
                 assert new_token_expert.shape==(src_vocab_size, num_expert)
                 self.src_token_to_expert[moe_layer_cnt]+=new_token_expert
@@ -1054,7 +1057,7 @@ class TransformerDecoder(FairseqIncrementalDecoder):
     def collect_expert_choices(self, tgt_tokens):
         num_expert=self.args.moe_expert_count
         tgt_vocab_size=self.embed_tokens.num_embeddings
-        tgt_tokens=utils.one_hot(tgt_tokens[:,-1].reshape(-1), tgt_vocab_size, unsqueeze_indices=True)
+        tgt_tokens=utils.one_hot(tgt_tokens[:,-1].view(-1), tgt_vocab_size, unsqueeze_indices=True)
         dec_moe_layer_num=sum([l.is_moe_layer for l in self.layers])
         
         if not hasattr(self, 'tgt_token_to_expert'):

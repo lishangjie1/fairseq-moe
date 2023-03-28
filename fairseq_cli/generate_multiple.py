@@ -58,7 +58,7 @@ def main(cfg: DictConfig):
         cfg.generation.replace_unk is None or cfg.dataset.dataset_impl == "raw"
     ), "--replace-unk requires a raw text dataset (--dataset-impl=raw)"
 
-    lang_pairs=cfg.task.lang_pairs_to_generate
+    lang_pairs=cfg.task.lang_pairs_to_generate.split(",")
     assert len(lang_pairs)>0
     assert cfg.common_eval.results_path is not None
     os.makedirs(cfg.common_eval.results_path, exist_ok=True)
@@ -207,7 +207,7 @@ def init(cfg, output_file):
             moe_freq = 1
         else:
             moe_freq = 0
-        if cfg.distributed_training.ddp_backend=='fully_sharded':
+        if cfg.distributed_training.ddp_backend=='fully_sharded' and cfg.distributed_training.use_sharded_state:
             cfg.checkpoint.checkpoint_suffix += f"-shard{torch.distributed.get_rank()}"
     models, saved_cfg = checkpoint_utils.load_model_ensemble(
         utils.split_paths(cfg.common_eval.path),
@@ -551,7 +551,7 @@ def _main(cfg: DictConfig, task, models, lms, logger,  output_file):
 
 def cli_main():
     parser = options.get_generation_parser()
-    parser.add_argument('--lang-pairs-to-generate', type=str, nargs='+')
+    parser.add_argument('--lang-pairs-to-generate', type=str)
     args = options.parse_args_and_arch(parser)
     cfg = convert_namespace_to_omegaconf(args)
     distributed_utils.call_main(cfg, main)
