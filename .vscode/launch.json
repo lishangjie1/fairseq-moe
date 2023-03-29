@@ -105,7 +105,7 @@
                 "--lang-pairs", "en-fi", "--langs", "en,fi",
                 "--lang-pairs-to-generate", "en-fi",
                 "--is-moe", "--path", "/data/lsj/nfs/moe/moe_model3/checkpoint_best.pt" ,
-                "--max-tokens", "128" ,"--beam", "3", "--sacrebleu" ,
+                "--max-tokens", "4096" ,"--beam", "1", "--sacrebleu" ,
                 "--remove-bpe" ,"--results-path", "/data/lsj/nfs/moe/moe_res" ,
                 "--langtoks-specs", "main",
                 "--langtoks","{'main':('src', 'tgt')}",

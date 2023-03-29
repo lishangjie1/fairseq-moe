@@ -67,6 +67,8 @@ def main(cfg: DictConfig):
     saved_cfg, models, lms, logger=init(cfg, logger_output_file)
 
     enc_langs_experts_records, dec_langs_experts_records=[], []
+    enc_langs_cmr_records, dec_langs_cmr_records = [], []
+    enc_token_num, dec_token_num = [], []
     for pair in lang_pairs:
         utils.print_r0(f'generating for {pair}')
         src_lang, tgt_lang=pair.split('-')
@@ -92,16 +94,32 @@ def main(cfg: DictConfig):
         for model in models:
             if hasattr(model.encoder, 'src_token_to_expert'):
                 enc_langs_experts_records.append(model.encoder.src_token_to_expert.sum(dim=1))
+            if hasattr(model.encoder, 'src_token_cmr'):
+                enc_langs_cmr_records.append(model.encoder.src_token_cmr.sum(dim=1)) 
+                enc_token_num.append(model.encoder.src_token_total_num)
             if hasattr(model.decoder, 'tgt_token_to_expert'):
                 dec_langs_experts_records.append(model.decoder.tgt_token_to_expert.sum(dim=1))
+            if hasattr(model.decoder, 'tgt_token_cmr'):
+                dec_langs_cmr_records.append(model.decoder.tgt_token_cmr.sum(dim=1)) 
+                dec_token_num.append(model.decoder.tgt_token_total_num)
     if len(enc_langs_experts_records)>0:
         enc_langs_experts_records=torch.stack(enc_langs_experts_records, dim=0) # (langs, layers, experts)
         all_reduce(enc_langs_experts_records/torch.distributed.get_world_size(), group=None, op='sum')
+        
+        if len(enc_langs_cmr_records) > 0:
+            enc_langs_cmr_records = torch.stack(enc_langs_cmr_records, dim=0).squeeze(-1) # (langs, layers)
+            enc_token_num = torch.stack(enc_token_num, dim=0) # (langs, 1)
+
+            all_reduce(enc_langs_cmr_records, group=None, op='sum')
+            all_reduce(enc_token_num, group=None, op='sum')
+            enc_langs_cmr_records = enc_langs_cmr_records / enc_token_num # (langs, layers)
+        
         if torch.distributed.get_rank()==0:
             record_path=cfg.common_eval.results_path+'/enc_record.bin'
             draw_path=cfg.common_eval.results_path+'/enc_record.png'
             obj_to_save={
                 'record':enc_langs_experts_records,
+                'cmr_record':enc_langs_cmr_records,
                 'labels':lang_pairs
             }
             torch.save(obj_to_save, record_path)
@@ -112,11 +130,20 @@ def main(cfg: DictConfig):
     if len(dec_langs_experts_records)>0:
         dec_langs_experts_records=torch.stack(dec_langs_experts_records, dim=0) # (langs, layers, experts)
         all_reduce(dec_langs_experts_records/torch.distributed.get_world_size(), group=None, op='sum')
+        if len(dec_langs_cmr_records) > 0:
+            dec_langs_cmr_records = torch.stack(dec_langs_cmr_records, dim=0).squeeze(-1) # (langs, layers)
+            dec_token_num = torch.stack(dec_token_num, dim=0) # (langs, 1)
+
+            all_reduce(dec_langs_cmr_records, group=None, op='sum')
+            all_reduce(dec_token_num, group=None, op='sum')
+            dec_langs_cmr_records = dec_langs_cmr_records / dec_token_num # (langs, layers)
+        
         if torch.distributed.get_rank()==0:
             draw_path=cfg.common_eval.results_path+'/dec_record.png'
             record_path=cfg.common_eval.results_path+'/dec_record.bin'
             obj_to_save={
                 'record':dec_langs_experts_records,
+                'cmr_record':dec_langs_cmr_records,
                 'labels':lang_pairs
             }
             torch.save(obj_to_save, record_path)

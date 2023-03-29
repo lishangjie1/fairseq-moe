@@ -680,6 +680,9 @@ class TransformerEncoder(FairseqEncoder):
         
         if not self.training and getattr(self.args, 'record_token_expert', False):
             self.collect_expert_choices(src_tokens)
+            if self.args.use_moe_cmr:
+                self.collect_cmr_choices(src_tokens)
+
         
         return {
             "encoder_out": [x],  # T x B x C
@@ -710,9 +713,34 @@ class TransformerEncoder(FairseqEncoder):
                 expert_choices=layer.moe_layer.metadata['expert_choices'] # (e,s)
                 new_token_expert=torch.einsum('nv,en->ve', src_tokens.float(), expert_choices.float())
                 assert new_token_expert.shape==(src_vocab_size, num_expert)
-                self.src_token_to_expert[moe_layer_cnt]+=new_token_expert
+                self.src_token_to_expert[moe_layer_cnt]+=new_token_expert # (layer_num, vocab_size, num_expert)
                 moe_layer_cnt+=1
 
+    def collect_cmr_choices(self, src_tokens):
+        pad_token = self.dictionary.pad()
+        real_tokens_idx = src_tokens.ne(pad_token)
+        src_tokens = src_tokens[real_tokens_idx]
+        num_expert=self.args.moe_expert_count
+        src_vocab_size=self.embed_tokens.num_embeddings
+        src_tokens=utils.one_hot(src_tokens, src_vocab_size, unsqueeze_indices=True)
+
+        enc_moe_layer_num=sum([l.is_moe_layer for l in self.layers])
+
+        if not hasattr(self, 'src_token_cmr'):
+            self.src_token_cmr = torch.zeros(enc_moe_layer_num, src_vocab_size, 1, device=src_tokens.device)
+        if not hasattr(self, 'src_token_total_num'):
+            self.src_token_total_num = torch.tensor([0.], device=src_tokens.device)
+        
+        self.src_token_total_num += len(src_tokens)
+        
+        moe_layer_cnt=0
+        for layer in self.layers:
+            if layer.is_moe_layer:
+                cmr_choices=layer.moe_layer.metadata['cmr_choices'] # (s,)
+                new_token_cmr=torch.einsum('nv,n->v', src_tokens.float(), cmr_choices.float()).unsqueeze(1)
+                assert new_token_cmr.shape==(src_vocab_size, 1)
+                self.src_token_cmr[moe_layer_cnt]+=new_token_cmr
+                moe_layer_cnt+=1
     @torch.jit.export
     def reorder_encoder_out(self, encoder_out: Dict[str, List[Tensor]], new_order):
         """
@@ -1050,6 +1078,8 @@ class TransformerDecoder(FairseqIncrementalDecoder):
 
         if not self.training and getattr(self.args, 'record_token_expert', False):
             self.collect_expert_choices(prev_output_tokens)
+            if self.args.use_moe_cmr:
+                self.collect_cmr_choices(prev_output_tokens)
         if not features_only:
             x = self.output_layer(x)
         return x, extra
@@ -1070,6 +1100,28 @@ class TransformerDecoder(FairseqIncrementalDecoder):
                 new_token_expert=torch.einsum('nv,en->ve', tgt_tokens.float(), expert_choices.float())
                 assert new_token_expert.shape==(tgt_vocab_size, num_expert)
                 self.tgt_token_to_expert[moe_layer_cnt]+=new_token_expert
+                moe_layer_cnt+=1
+    
+    def collect_cmr_choices(self, tgt_tokens):
+
+
+        tgt_vocab_size=self.embed_tokens.num_embeddings
+        tgt_tokens=utils.one_hot(tgt_tokens[:,-1].view(-1), tgt_vocab_size, unsqueeze_indices=True)
+        dec_moe_layer_num=sum([l.is_moe_layer for l in self.layers])
+        
+        if not hasattr(self, 'tgt_token_cmr'):
+            self.tgt_token_cmr=torch.zeros(dec_moe_layer_num, tgt_vocab_size, 1, device=tgt_tokens.device)
+        if not hasattr(self, 'tgt_token_total_num'):
+            self.tgt_token_total_num = torch.tensor([0.], device=tgt_tokens.device)
+        
+        self.tgt_token_total_num += len(tgt_tokens)
+        moe_layer_cnt=0
+        for layer in self.layers:
+            if layer.is_moe_layer:
+                cmr_choices=layer.moe_layer.metadata['cmr_choices']
+                new_token_cmr=torch.einsum('nv,n->v', tgt_tokens.float(), cmr_choices.float()).unsqueeze(1)
+                assert new_token_cmr.shape==(tgt_vocab_size, 1)
+                self.tgt_token_cmr[moe_layer_cnt]+=new_token_cmr
                 moe_layer_cnt+=1
 
     def extract_features(

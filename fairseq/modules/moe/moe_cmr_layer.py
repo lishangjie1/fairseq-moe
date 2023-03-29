@@ -89,7 +89,7 @@ class CMRLayer(torch.nn.Module):
         l_aux["cmr_gate_loss_denom"] = total_budget
 
         self.moe_layer.metadata["cmr_share_rate"] = (1 - gates).mean().data
-
+        self.record_cmr_choices(gates)
         #self.moe_layer.metadata["cmr_lang_gates"] = 0
         # if prefix_tokens is not None and self.lang_idx is not None:
         #     num_langs = self.lang_idx.shape[0]
@@ -110,3 +110,6 @@ class CMRLayer(torch.nn.Module):
         #         gates.mean(dim=1, keepdim=True)
         #     ).detach()
         return x_out, l_aux
+
+    def record_cmr_choices(self, gates):
+        self.moe_layer.metadata['cmr_choices'] = gates.data # (s,)
