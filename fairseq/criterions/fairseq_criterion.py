@@ -227,13 +227,13 @@ class MoECriterion(FairseqCriterion):
         cmr_gate_used_sum = torch.zeros_like(gate_loss, dtype=torch.float32)
         cmr_gate_total_sum = torch.zeros_like(gate_loss, dtype=torch.float32)
         for l_aux in net_output[1]["l_aux"]:
-            if l_aux is not None:
+            if l_aux is not None and hasattr(l_aux, "cmr_gate_loss_num"):
                 cmr_gate_used = l_aux["cmr_gate_loss_num"]
                 if cmr_gate_used is not None:
                     cmr_gate_used_sum += cmr_gate_used
 
         for l_aux in net_output[1]["l_aux"]:
-            if l_aux is not None:
+            if l_aux is not None and hasattr(l_aux, "cmr_gate_loss_denom"):
                 cmr_gate_total = l_aux["cmr_gate_loss_denom"]
                 if cmr_gate_total is not None:
                     cmr_gate_total_sum += cmr_gate_total
