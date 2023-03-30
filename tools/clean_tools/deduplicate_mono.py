@@ -10,15 +10,10 @@ import hashlib
 import sys
 import string
 from multiprocessing import Pool
-from zhon.hanzi import punctuation 
 
 
-english_punc = string.punctuation
-chinese_punc = punctuation
-punc = english_punc + chinese_punc
 def get_hashes_and_lines(raw_line):
     if isinstance(raw_line, str):
-        #new_line = "".join([c for c in raw_line if c not in punc])
         hash = hashlib.md5(raw_line.encode().strip()).hexdigest()
         return hash, raw_line
     else:
@@ -28,25 +23,26 @@ def get_hashes_and_lines(raw_line):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--workers", type=int, default=4)
-    parser.add_argument("pre_files", help="previous input files")
-    parser.add_argument("rec_files", help="recent input files")
-    parser.add_argument("out_file", help="recent output files")
+    parser.add_argument("--pre-file", help="previous input files", default=None)
+    parser.add_argument("--rec-file", help="recent input files")
+    parser.add_argument("--out-file", help="recent output files")
     args = parser.parse_args()
 
     seen = set()
-    with open(args.pre_files, mode="r") as h:
-        pool = Pool(args.workers)
-        results = pool.imap_unordered(get_hashes_and_lines, h, 1000)
-        for i, (hash, raw_line) in enumerate(results):
-            if hash not in seen:
-                seen.add(hash)
-            if i % 1000000 == 0:
-                print(i, file=sys.stderr, end="", flush=True)
-            elif i % 100000 == 0:
-                print(".", file=sys.stderr, end="", flush=True)
+    if args.pre_file is not None:
+        with open(args.pre_file, mode="r") as h:
+            pool = Pool(args.workers)
+            results = pool.imap_unordered(get_hashes_and_lines, h, 1000)
+            for i, (hash, raw_line) in enumerate(results):
+                if hash not in seen:
+                    seen.add(hash)
+                if i % 1000000 == 0:
+                    print(i, file=sys.stderr, end="", flush=True)
+                elif i % 100000 == 0:
+                    print(".", file=sys.stderr, end="", flush=True)
 
 
-    with open(args.rec_files, mode="r") as h, open(args.out_file, mode="w") as w:
+    with open(args.rec_file, mode="r") as h, open(args.out_file, mode="w") as w:
         pool = Pool(args.workers)
         results = pool.imap_unordered(get_hashes_and_lines, h, 1000)
         for i, (hash, raw_line) in enumerate(results):

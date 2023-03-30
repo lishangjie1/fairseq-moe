@@ -10,58 +10,50 @@ import hashlib
 import sys
 import string
 from multiprocessing import Pool
-from zhon.hanzi import punctuation 
 
-
-english_punc = string.punctuation
-chinese_punc = punctuation
-punc = english_punc + chinese_punc
-def get_hashes_and_lines(raw_line):
-    if isinstance(raw_line, str):
-        new_line = "".join([c for c in raw_line if c not in punc])
-        hash = hashlib.md5(new_line.encode().strip()).hexdigest()
-        return hash, raw_line
-    elif isinstance(raw_line, tuple):
-        new_line = "".join([c for c in raw_line if c not in punc])
-        hash_src = hashlib.md5(new_line.encode().strip()).hexdigest()
-        #hash_tgt = hashlib.md5(raw_line[1].strip()).hexdigest()
-        return hash_src, raw_line
+def get_hashes_and_lines(raw_lines):
+    if isinstance(raw_lines, tuple):
+        concat_line = raw_lines[0].strip() + raw_lines[1].strip()
+        hash_src = hashlib.md5(concat_line.encode().strip()).hexdigest()
+        return hash_src, raw_lines
     else:
-        raise Exception("wrong input")
+        raise Exception("wrong input format")
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--workers", type=int, default=4)
-    parser.add_argument("pre_files", help="previous input files")
-    parser.add_argument("rec_files_src", help="recent input source files")
-    parser.add_argument("rec_files_tgt", help="recent input source files")
-    parser.add_argument("out_file_src", help="recent output source files")
-    parser.add_argument("out_file_tgt", help="recent output source files")
+    parser.add_argument("--pre-files-src", help="previous input files", default=None)
+    parser.add_argument("--pre-files-tgt", help="previous input files", default=None)
+    parser.add_argument("--rec-files-src", help="recent input source files")
+    parser.add_argument("--rec-files-tgt", help="recent input source files")
+    parser.add_argument("--out-file-src", help="recent output source files")
+    parser.add_argument("--out-file-tgt", help="recent output source files")
     args = parser.parse_args()
 
     seen = set()
-    with open(args.pre_files, mode="r") as h:
-        pool = Pool(args.workers)
-        results = pool.imap_unordered(get_hashes_and_lines, h, 1000)
-        for i, (hash, raw_line) in enumerate(results):
-            if hash not in seen:
-                seen.add(hash)
-            if i % 1000000 == 0:
-                print(i, file=sys.stderr, end="", flush=True)
-            elif i % 100000 == 0:
-                print(".", file=sys.stderr, end="", flush=True)
+    if args.pre_files_src is not None:
+        with open(args.pre_files_src, mode="r") as h_src, open(args.pre_files_tgt, mode="r") as h_tgt:
+            pool = Pool(args.workers)
+            results = pool.imap_unordered(get_hashes_and_lines, zip(h_src, h_tgt), 1000)
+            for i, (hash, raw_lines) in enumerate(results):
+                if hash not in seen:
+                    seen.add(hash)
+                if i % 1000000 == 0:
+                    print(i, file=sys.stderr, end="", flush=True)
+                elif i % 100000 == 0:
+                    print(".", file=sys.stderr, end="", flush=True)
 
 
     with open(args.rec_files_src, mode="r") as h_src, open(args.rec_files_tgt, mode="r") as h_tgt, \
         open(args.out_file_src, mode="w") as w_src, open(args.out_file_tgt, mode="w") as w_tgt:
         pool = Pool(args.workers)
         results = pool.imap_unordered(get_hashes_and_lines, zip(h_src,h_tgt), 1000)
-        for i, (hash, raw_line) in enumerate(results):
+        for i, (hash, raw_lines) in enumerate(results):
             if hash not in seen:
                 seen.add(hash)
-                w_src.write(raw_line[0].strip() + "\n")
-                w_tgt.write(raw_line[1].strip() + "\n")
+                w_src.write(raw_lines[0].strip() + "\n")
+                w_tgt.write(raw_lines[1].strip() + "\n")
 
             if i % 1000000 == 0:
                 print(i, file=sys.stderr, end="", flush=True)
